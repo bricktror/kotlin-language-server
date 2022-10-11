@@ -68,26 +68,29 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     fun getProtocolExtensionService(): KotlinProtocolExtensions = protocolExtensions
 
     override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> = async.compute {
-        val serverCapabilities = ServerCapabilities()
-        serverCapabilities.setTextDocumentSync(TextDocumentSyncKind.Incremental)
-        serverCapabilities.workspace = WorkspaceServerCapabilities()
-        serverCapabilities.workspace.workspaceFolders = WorkspaceFoldersOptions()
-        serverCapabilities.workspace.workspaceFolders.supported = true
-        serverCapabilities.workspace.workspaceFolders.changeNotifications = Either.forRight(true)
-        serverCapabilities.hoverProvider = Either.forLeft(true)
-        serverCapabilities.renameProvider = Either.forLeft(true)
-        serverCapabilities.completionProvider = CompletionOptions(false, listOf("."))
-        serverCapabilities.signatureHelpProvider = SignatureHelpOptions(listOf("(", ","))
-        serverCapabilities.definitionProvider = Either.forLeft(true)
-        serverCapabilities.documentSymbolProvider = Either.forLeft(true)
-        serverCapabilities.workspaceSymbolProvider = Either.forLeft(true)
-        serverCapabilities.referencesProvider = Either.forLeft(true)
-        serverCapabilities.semanticTokensProvider = SemanticTokensWithRegistrationOptions(semanticTokensLegend, true, true)
-        serverCapabilities.codeActionProvider = Either.forLeft(true)
-        serverCapabilities.documentFormattingProvider = Either.forLeft(true)
-        serverCapabilities.documentRangeFormattingProvider = Either.forLeft(true)
-        serverCapabilities.executeCommandProvider = ExecuteCommandOptions(ALL_COMMANDS)
-        serverCapabilities.documentHighlightProvider = Either.forLeft(true)
+        val serverCapabilities = ServerCapabilities().apply {
+            setTextDocumentSync(TextDocumentSyncKind.Incremental)
+            workspace = WorkspaceServerCapabilities().apply {
+                workspaceFolders = WorkspaceFoldersOptions().apply {
+                    supported = true
+                    changeNotifications = Either.forRight(true)
+                }
+            }
+            hoverProvider = Either.forLeft(true)
+            renameProvider = Either.forLeft(true)
+            completionProvider = CompletionOptions(false, listOf("."))
+            signatureHelpProvider = SignatureHelpOptions(listOf("(", ","))
+            definitionProvider = Either.forLeft(true)
+            documentSymbolProvider = Either.forLeft(true)
+            workspaceSymbolProvider = Either.forLeft(true)
+            referencesProvider = Either.forLeft(true)
+            semanticTokensProvider = SemanticTokensWithRegistrationOptions(semanticTokensLegend, true, true)
+            codeActionProvider = Either.forLeft(true)
+            documentFormattingProvider = Either.forLeft(true)
+            documentRangeFormattingProvider = Either.forLeft(true)
+            executeCommandProvider = ExecuteCommandOptions(ALL_COMMANDS)
+            documentHighlightProvider = Either.forLeft(true)
+        }
 
         val clientCapabilities = params.capabilities
         config.completion.snippets.enabled = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false

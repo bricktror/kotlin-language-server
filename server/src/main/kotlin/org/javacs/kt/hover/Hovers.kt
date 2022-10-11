@@ -77,8 +77,9 @@ private fun renderTypeOf(element: KtExpression, bindingContext: BindingContext):
         }
     }
 
-    val expressionType = bindingContext[BindingContext.EXPRESSION_TYPE_INFO, element]?.type ?: element.getType(bindingContext)
-    val result = expressionType?.let { TYPE_RENDERER.renderType(it) } ?: return null
+    val expressionType = bindingContext[BindingContext.EXPRESSION_TYPE_INFO, element]?.type
+         ?: return null //element.getType(bindingContext) // TODO this call is deprecated, replace?
+    val result = TYPE_RENDERER.renderType(expressionType)
 
     val smartCast = bindingContext[BindingContext.SMARTCAST, element]
     if (smartCast != null && element is KtReferenceExpression) {

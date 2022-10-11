@@ -13,25 +13,22 @@ import java.nio.file.Paths
 internal class GradleClassPathResolver(private val path: Path, private val includeKotlinDSL: Boolean): ClassPathResolver {
     override val resolverType: String = "Gradle"
     private val projectDirectory: Path get() = path.getParent()
-    override val classpath: Set<ClassPathEntry> get() {
-        val scripts = listOf("projectClassPathFinder.gradle")
-        val tasks = listOf("kotlinLSPProjectDeps")
 
-        return readDependenciesViaGradleCLI(projectDirectory, scripts, tasks)
+    override val classpath: Set<ClassPathEntry> get() =
+        readDependenciesViaGradleCLI(
+                projectDirectory,
+                gradleScripts=listOf("projectClassPathFinder.gradle.kts"),
+                gradleTasks=listOf("kotlinLSPProjectDeps"))
             .apply { if (isNotEmpty()) LOG.info("Successfully resolved dependencies for '${projectDirectory.fileName}' using Gradle") }
             .map { ClassPathEntry(it, null) }.toSet()
-    }
-    override val buildScriptClasspath: Set<Path> get() {
-        return if (includeKotlinDSL) {
-            val scripts = listOf("kotlinDSLClassPathFinder.gradle")
-            val tasks = listOf("kotlinLSPKotlinDSLDeps")
 
-            return readDependenciesViaGradleCLI(projectDirectory, scripts, tasks)
-                .apply { if (isNotEmpty()) LOG.info("Successfully resolved build script dependencies for '${projectDirectory.fileName}' using Gradle") }
-        } else {
-            emptySet()
-        }
-    }
+    override val buildScriptClasspath: Set<Path> get() =
+        if (!includeKotlinDSL) emptySet()
+        else readDependenciesViaGradleCLI(
+                projectDirectory,
+                gradleScripts=listOf("kotlinDSLClassPathFinder.gradle.kts"),
+                gradleTasks=listOf("kotlinLSPKotlinDSLDeps"))
+            .apply { if (isNotEmpty()) LOG.info("Successfully resolved build script dependencies for '${projectDirectory.fileName}' using Gradle") }
 
     companion object {
         /** Create a Gradle resolver if a file is a pom. */
@@ -42,12 +39,12 @@ internal class GradleClassPathResolver(private val path: Path, private val inclu
 }
 
 private fun gradleScriptToTempFile(scriptName: String, deleteOnExit: Boolean = false): File {
-    val config = File.createTempFile("classpath", ".gradle")
+    val config = File.createTempFile("classpath-${scriptName.replace("\\W".toRegex(), "")}", ".gradle.kts")
     if (deleteOnExit) {
         config.deleteOnExit()
     }
 
-    LOG.debug("Creating temporary gradle file {}", config.absolutePath)
+    LOG.debug("Creating temporary gradle file {} ({})", config.absolutePath, scriptName)
 
     config.bufferedWriter().use { configWriter ->
         GradleClassPathResolver::class.java.getResourceAsStream("/$scriptName").bufferedReader().use { configReader ->
@@ -70,7 +67,11 @@ private fun getGradleCommand(workspace: Path): Path {
     }
 }
 
-private fun readDependenciesViaGradleCLI(projectDirectory: Path, gradleScripts: List<String>, gradleTasks: List<String>): Set<Path> {
+private fun readDependenciesViaGradleCLI(
+    projectDirectory: Path,
+    gradleScripts: List<String>,
+    gradleTasks: List<String>
+): Set<Path> {
     LOG.info("Resolving dependencies for '{}' through Gradle's CLI using tasks {}...", projectDirectory.fileName, gradleTasks)
 
     val tmpScripts = gradleScripts.map { gradleScriptToTempFile(it, deleteOnExit = false).toPath().toAbsolutePath() }
