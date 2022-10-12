@@ -168,9 +168,4 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
 
     override fun exit() {}
 
-    // Fixed in https://github.com/eclipse/lsp4j/commit/04b0c6112f0a94140e22b8b15bb5a90d5a0ed851
-    // Causes issue in lsp 0.15
-    override fun getNotebookDocumentService(): NotebookDocumentService? {
-		return null;
-	}
 }

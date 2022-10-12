@@ -7,6 +7,7 @@ val kotlinVersion: String by extra
 val lsp4jVersion: String by extra
 val exposedVersion: String by extra
 val projectVersion: String by extra
+val slf4jVersion: String by extra
 
 application {
     applicationName="kotlin-language-server"
@@ -20,6 +21,8 @@ repositories {
 }
 
 dependencies {
+    implementation("org.slf4j:slf4j-api:$slf4jVersion")
+    implementation("org.slf4j:slf4j-simple:$slf4jVersion")
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j:$lsp4jVersion")
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc:$lsp4jVersion")
     implementation("org.jetbrains.kotlin:kotlin-compiler:$kotlinVersion")
