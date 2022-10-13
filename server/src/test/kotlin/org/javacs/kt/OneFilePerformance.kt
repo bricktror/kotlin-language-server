@@ -1,5 +1,11 @@
 package org.javacs.kt
 
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.javacs.kt.util.LoggingMessageCollector
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
 import org.jetbrains.kotlin.cli.jvm.compiler.CliBindingTrace
@@ -21,7 +27,6 @@ import org.jetbrains.kotlin.resolve.LazyTopDownAnalyzer
 import org.jetbrains.kotlin.resolve.TopDownAnalysisMode
 /* import org.jetbrains.kotlin.resolve.calls.callUtil.getParentResolvedCall */
 import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowInfoFactory
-import org.junit.Test
 import org.openjdk.jmh.annotations.*
 import org.openjdk.jmh.runner.Runner
 import org.openjdk.jmh.runner.RunnerException

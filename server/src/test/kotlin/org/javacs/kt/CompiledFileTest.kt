@@ -1,11 +1,12 @@
 package org.javacs.kt
 
-import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.javacs.kt.compiler.Compiler
-import org.junit.AfterClass
-import org.junit.Assert.assertThat
-import org.junit.Test
-import org.junit.BeforeClass
 import java.io.File
 import java.nio.file.Files
 
@@ -15,12 +16,12 @@ class CompiledFileTest {
     companion object {
         lateinit var outputDirectory: File
 
-        @JvmStatic @BeforeClass fun setup() {
+        @JvmStatic @BeforeAll fun setup() {
             LOG.connectStdioBackend()
             outputDirectory = Files.createTempDirectory("klsBuildOutput").toFile()
         }
 
-        @JvmStatic @AfterClass fun tearDown() {
+        @JvmStatic @AfterAll fun tearDown() {
             outputDirectory.delete()
         }
     }

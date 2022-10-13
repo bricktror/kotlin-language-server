@@ -1,12 +1,14 @@
 package org.javacs.kt
 
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.eclipse.lsp4j.DocumentFormattingParams
 import org.eclipse.lsp4j.TextDocumentIdentifier
 import org.eclipse.lsp4j.FormattingOptions
-import org.junit.Test
-import org.junit.Ignore
-import org.junit.Assert.assertThat
-import org.hamcrest.Matchers.equalTo
 
 class FormatTest : SingleFileTestFixture("formatting", "NonFormatted.kt") {
     @Test fun `format kotlin code`() {

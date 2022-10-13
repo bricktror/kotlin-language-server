@@ -1,14 +1,16 @@
 package org.javacs.kt
 
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import com.google.gson.Gson
 import org.eclipse.lsp4j.ExecuteCommandParams
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.TextDocumentIdentifier
-import org.junit.Test
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 
 class NoMainResolve : SingleFileTestFixture("resolvemain", "NoMain.kt") {
     @Test

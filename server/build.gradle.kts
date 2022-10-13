@@ -39,8 +39,6 @@ dependencies {
     implementation("com.github.fwcd.ktfmt:ktfmt:b5d31d1")
     implementation("com.beust:jcommander:1.78")
 
-    testImplementation("org.hamcrest:hamcrest-all:1.3")
-    testImplementation("junit:junit:4.11")
     testImplementation("org.openjdk.jmh:jmh-core:1.20")
 
     compileOnly("org.jetbrains.kotlin:kotlin-scripting-jvm-host:$kotlinVersion")

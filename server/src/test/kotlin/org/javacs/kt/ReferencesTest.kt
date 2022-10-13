@@ -1,8 +1,10 @@
 package org.javacs.kt
 
 import org.hamcrest.Matchers.*
-import org.junit.Assert.assertThat
-import org.junit.Test
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
 
 class ReferencesTest : SingleFileTestFixture("references", "ReferenceTo.kt") {
     @Test fun `find referencs to foo`() {

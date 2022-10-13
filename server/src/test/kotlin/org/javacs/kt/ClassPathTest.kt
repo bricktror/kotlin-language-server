@@ -1,16 +1,19 @@
 package org.javacs.kt
 
 import org.hamcrest.Matchers.*
-import org.javacs.kt.classpath.*
-import org.junit.Assert.assertThat
-import org.junit.Assert.assertTrue
-import org.junit.Test
-import org.junit.BeforeClass
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import java.nio.file.Files
 
+import org.javacs.kt.classpath.*
+
+@Disabled
 class ClassPathTest {
     companion object {
-        @JvmStatic @BeforeClass fun setupLogger() {
+        @JvmStatic @BeforeAll fun setupLogger() {
             LOG.connectStdioBackend()
         }
     }
@@ -22,8 +25,7 @@ class ClassPathTest {
         assertTrue(Files.exists(buildFile))
 
         val resolvers = defaultClassPathResolver(listOf(workspaceRoot))
-        print(resolvers)
-        val classPath = resolvers.classpathOrEmpty.map { it.toString() }
+        val classPath = resolvers.classpath.map { it.toString() }
 
         assertThat(classPath, hasItem(containsString("junit")))
     }
@@ -35,13 +37,12 @@ class ClassPathTest {
         assertTrue(Files.exists(buildFile))
 
         val resolvers = defaultClassPathResolver(listOf(workspaceRoot))
-        print(resolvers)
-        val classPath = resolvers.classpathOrEmpty.map { it.toString() }
+        val classPath = resolvers.classpath.map { it.toString() }
 
         assertThat(classPath, hasItem(containsString("junit")))
     }
 
     @Test fun `find kotlin stdlib`() {
-        assertThat(findKotlinStdlib(), notNullValue())
+        assertNotNull(findKotlinStdlib())
     }
 }

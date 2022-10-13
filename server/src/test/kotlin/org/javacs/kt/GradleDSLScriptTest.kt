@@ -1,8 +1,11 @@
 package org.javacs.kt
 
-import org.junit.Test
-import org.junit.Assert.assertThat
 import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.eclipse.lsp4j.MarkupContent
 
 class GradleDSLScriptTest : SingleFileTestFixture("kotlinDSLWorkspace", "build.gradle.kts") {

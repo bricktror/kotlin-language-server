@@ -1,14 +1,13 @@
 package org.javacs.kt
 
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
-import org.hamcrest.Matchers.containsString
-import org.hamcrest.Matchers.equalTo
-import org.hamcrest.Matchers.hasItem
-import org.hamcrest.Matchers.hasProperty
-import org.hamcrest.Matchers.hasSize
-import org.junit.Assert.assertThat
-import org.junit.Test
 
 class RenameReferenceTest : SingleFileTestFixture("rename", "SomeClass.kt") {
 

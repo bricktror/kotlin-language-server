@@ -1,14 +1,16 @@
 package org.javacs.kt
 
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.eclipse.lsp4j.DocumentHighlight
 import org.eclipse.lsp4j.DocumentHighlightKind
 import org.eclipse.lsp4j.DocumentHighlightParams
 import org.eclipse.lsp4j.TextDocumentIdentifier
 import org.eclipse.lsp4j.Position
-import org.hamcrest.Matchers.hasSize
-import org.hamcrest.Matchers.equalTo
-import org.junit.Assert.assertThat
-import org.junit.Test
 
 class DocumentHighlightTest : SingleFileTestFixture("highlight", "DocumentHighlight.kt") {
 
@@ -83,7 +85,7 @@ class DocumentHighlightTest : SingleFileTestFixture("highlight", "DocumentHighli
         assertThat(secondHighlight.range, equalTo(range(9, 13, 9, 31)))
         assertThat(secondHighlight.kind, equalTo(DocumentHighlightKind.Text))
     }
-    
+
     @Test
     fun `should highlight shadowed variable correctly, just show the shadowed variable`() {
         val fileUri = workspaceRoot.resolve(file).toUri().toString()

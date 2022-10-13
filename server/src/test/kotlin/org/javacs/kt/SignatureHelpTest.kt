@@ -1,9 +1,10 @@
 package org.javacs.kt
 
 import org.hamcrest.Matchers.*
-import org.junit.Assert.assertThat
-import org.junit.Ignore
-import org.junit.Test
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
 
 class SignatureHelpTest : SingleFileTestFixture("signatureHelp", "SignatureHelp.kt") {
     @Test fun `provide signature help for a function call`() {
@@ -42,7 +43,7 @@ class SignatureHelpTest : SingleFileTestFixture("signatureHelp", "SignatureHelp.
         assertThat(help.activeParameter, equalTo(0))
     }
 
-    @Ignore @Test fun `find active signature using types`() {
+    @Disabled @Test fun `find active signature using types`() {
         val help = languageServer.textDocumentService.signatureHelp(signatureHelpParams(file, 5, 32)).get()!!
 
         assertThat(help.signatures[help.activeSignature].label, equalTo("fun multiParam(first: String, second: String): Unit"))

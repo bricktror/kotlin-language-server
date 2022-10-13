@@ -1,8 +1,12 @@
 package org.javacs.kt
 
-import org.junit.Assert.assertEquals
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.javacs.kt.util.parseURI
-import org.junit.Test
 import java.net.URI
 
 class URIsTest {

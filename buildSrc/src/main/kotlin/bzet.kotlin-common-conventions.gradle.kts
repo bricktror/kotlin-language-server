@@ -31,9 +31,11 @@ dependencies {
 
     // Use JUnit Jupiter for testing.
     testImplementation("org.junit.jupiter:junit-jupiter:5.8.2")
+    testImplementation("org.hamcrest:hamcrest-all:1.3")
 }
 
 tasks.named<Test>("test") {
     // Use JUnit Platform for unit tests.
     useJUnitPlatform()
+    maxParallelForks=Runtime.getRuntime().availableProcessors() / 2
 }

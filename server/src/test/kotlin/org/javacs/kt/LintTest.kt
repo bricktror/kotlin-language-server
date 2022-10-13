@@ -1,13 +1,16 @@
 package org.javacs.kt
 
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import java.util.concurrent.CancellationException
 import org.eclipse.lsp4j.Diagnostic
 import org.eclipse.lsp4j.DocumentSymbolParams
 import org.eclipse.lsp4j.PublishDiagnosticsParams
 import org.eclipse.lsp4j.TextDocumentIdentifier
-import org.hamcrest.Matchers.*
-import org.junit.Assert.assertThat
-import org.junit.Test
 
 class LintTest : SingleFileTestFixture("lint", "LintErrors.kt") {
     @Test fun `report error on open`() {

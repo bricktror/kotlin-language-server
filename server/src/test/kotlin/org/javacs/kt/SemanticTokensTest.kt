@@ -1,8 +1,11 @@
 package org.javacs.kt
 
 import org.hamcrest.Matchers.*
-import org.junit.Assert.assertThat
-import org.junit.Test
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.javacs.kt.semantictokens.encodeTokens
 import org.javacs.kt.semantictokens.SemanticToken
 import org.javacs.kt.semantictokens.SemanticTokenType

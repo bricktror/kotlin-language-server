@@ -1,9 +1,13 @@
 package org.javacs.kt
 
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.services.LanguageClient
-import org.junit.Before
-import org.junit.After
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
@@ -43,11 +47,11 @@ abstract class LanguageServerTestFixture(relativeWorkspaceRoot: String) : Langua
         return languageServer
     }
 
-    @After fun closeLanguageServer() {
+    @AfterEach fun closeLanguageServer() {
         languageServer.close()
     }
 
-    @After fun printMemoryUsage() {
+    @AfterEach fun printMemoryUsage() {
         val rt = Runtime.getRuntime()
         val total = rt.totalMemory().toDouble() / 1000000.0
         val free = rt.freeMemory().toDouble() / 1000000.0
@@ -164,7 +168,7 @@ fun testResourcesRoot(): Path {
 }
 
 open class SingleFileTestFixture(relativeWorkspaceRoot: String, val file: String) : LanguageServerTestFixture(relativeWorkspaceRoot) {
-    @Before fun openFile() {
+    @BeforeEach fun openFile() {
         open(file)
 
         // Wait for lint, so subsequent replace(...) operations cause recovery

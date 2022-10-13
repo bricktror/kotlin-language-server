@@ -1,17 +1,17 @@
 package org.javacs.kt
 
-import org.hamcrest.Matchers.hasToString
+import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtReferenceExpression
 import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.javacs.kt.compiler.Compiler
-import org.junit.Assert.assertThat
-import org.junit.Test
-import org.junit.After
-import org.junit.AfterClass
-import org.junit.BeforeClass
 import java.io.File
 import java.nio.file.Files
 
@@ -27,13 +27,13 @@ private class FileToEdit {
         lateinit var outputDirectory: File
         lateinit var compiler: Compiler
 
-        @JvmStatic @BeforeClass fun setup() {
+        @JvmStatic @BeforeAll fun setup() {
             LOG.connectStdioBackend()
             outputDirectory = Files.createTempDirectory("klsBuildOutput").toFile()
             compiler = Compiler(setOf(), setOf(), outputDirectory = outputDirectory)
         }
 
-        @JvmStatic @AfterClass
+        @JvmStatic @AfterAll
         fun tearDown() {
             outputDirectory.delete()
         }
@@ -90,7 +90,7 @@ private class FileToEdit {
         assertThat(target.name, hasToString("intFunction"))
     }
 
-    @After fun cleanUp() {
+    @AfterEach fun cleanUp() {
         compiler.close()
     }
 }

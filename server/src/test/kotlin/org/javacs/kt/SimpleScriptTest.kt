@@ -1,8 +1,11 @@
 package org.javacs.kt
 
-import org.junit.*
-import org.junit.Assert.*
 import org.hamcrest.Matchers.*
+import org.hamcrest.MatcherAssert.assertThat
+import org.junit.jupiter.api.*
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+
 import kotlin.script.experimental.api.*
 import kotlin.script.experimental.jvm.jvm
 import kotlin.script.experimental.jvm.dependenciesFromCurrentContext
@@ -31,6 +34,7 @@ private class SnippetRunner {
     }
 }
 
+@Disabled
 class SimpleScriptTest {
     // TODO: Test a script using the language server instead
     //       of just experimenting with the API
@@ -50,7 +54,7 @@ class SimpleScriptTest {
 
     private fun assertNotError(result: ResultWithDiagnostics<EvaluationResult>) {
         if (result is ResultWithDiagnostics.Failure) {
-            fail("Error(s) while running REPL: ${result.reports}")
+            fail{"Error(s) while running REPL: ${result.reports}"}
         }
     }
 }
