@@ -3,30 +3,38 @@ package org.javacs.kt
 import org.javacs.kt.classpath.ClassPathEntry
 import org.javacs.kt.classpath.defaultClassPathResolver
 import org.javacs.kt.compiler.Compiler
-import org.javacs.kt.util.AsyncExecutor
+import org.javacs.kt.util.TempFile
 import java.io.Closeable
 import java.io.File
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.coroutines.*
+import kotlin.coroutines.*
 
 /**
  * Manages the class path (compiled JARs, etc), the Java source path
  * and the compiler. Note that Kotlin sources are stored in SourcePath.
  */
-class CompilerClassPath(private val config: CompilerConfiguration) : Closeable {
+class CompilerClassPath(
+    private val config: CompilerConfiguration,
+    val outputDirectory: File,
+    private val scope: CoroutineScope,
+) : Closeable {
     val workspaceRoots = mutableSetOf<Path>()
 
     private val javaSourcePath = mutableSetOf<Path>()
     private val buildScriptClassPath = mutableSetOf<Path>()
     val classPath = mutableSetOf<ClassPathEntry>()
-    val outputDirectory: File = Files.createTempDirectory("klsBuildOutput").toFile()
+
     val javaHome: String? = System.getProperty("java.home", null)
 
-    var compiler = Compiler(javaSourcePath, classPath.map { it.compiledJar }.toSet(), buildScriptClassPath, outputDirectory)
-        private set
+    var compiler = Compiler(
+        javaSourcePath,
+        classPath.map { it.compiledJar }.toSet(),
+        buildScriptClassPath,
+        outputDirectory)
 
-    private val async = AsyncExecutor()
 
     init {
         compiler.updateConfiguration(config)
@@ -142,7 +150,6 @@ class CompilerClassPath(private val config: CompilerConfiguration) : Closeable {
 
     override fun close() {
         compiler.close()
-        outputDirectory.delete()
     }
 }
 

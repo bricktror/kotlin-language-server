@@ -6,12 +6,15 @@ import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
-import org.javacs.kt.compiler.Compiler
 import java.io.File
 import java.nio.file.Files
+import kotlinx.coroutines.*
+
+import org.javacs.kt.compiler.Compiler
+import org.javacs.kt.util.AsyncExecutor
+import org.javacs.kt.util.TempFile
 
 class CompiledFileTest {
-    val compiledFile = compileFile()
 
     companion object {
         lateinit var outputDirectory: File
@@ -26,18 +29,21 @@ class CompiledFileTest {
         }
     }
 
-    fun compileFile(): CompiledFile = Compiler(setOf(), setOf(), outputDirectory = outputDirectory).use { compiler ->
+    fun compileFile(dir: File): CompiledFile = Compiler(setOf(), setOf(), outputDirectory = outputDirectory).use { compiler ->
         val file = testResourcesRoot().resolve("compiledFile/CompiledFileExample.kt")
         val content = Files.readAllLines(file).joinToString("\n")
         val parse = compiler.createKtFile(content, file)
-        val classPath = CompilerClassPath(CompilerConfiguration())
+        val classPath = CompilerClassPath(CompilerConfiguration(), dir, CoroutineScope(Dispatchers.Main))
         val sourcePath = listOf(parse)
         val (context, container) = compiler.compileKtFiles(sourcePath, sourcePath)
         CompiledFile(content, parse, context, container, sourcePath, classPath)
     }
 
     @Test fun `typeAtPoint should return type for x`() {
-        val type = compiledFile.typeAtPoint(87)!!
+        val type= TempFile.createDirectory().use {
+            val compiledFile = compileFile(it.file)
+            compiledFile.typeAtPoint(87)!!
+        }
 
         assertThat(type.toString(), equalTo("Int"))
     }

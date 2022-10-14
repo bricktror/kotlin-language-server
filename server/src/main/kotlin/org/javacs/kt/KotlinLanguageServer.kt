@@ -9,8 +9,8 @@ import org.eclipse.lsp4j.services.LanguageServer
 import org.eclipse.lsp4j.services.NotebookDocumentService
 import org.javacs.kt.command.ALL_COMMANDS
 import org.javacs.kt.externalsources.*
-import org.javacs.kt.util.AsyncExecutor
 import org.javacs.kt.util.TemporaryDirectory
+import org.javacs.kt.util.TempFile
 import org.javacs.kt.util.parseURI
 import org.javacs.kt.progress.Progress
 import org.javacs.kt.progress.LanguageClientProgress
@@ -19,23 +19,36 @@ import java.io.Closeable
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletableFuture.completedFuture
+import kotlinx.coroutines.*
+import kotlinx.coroutines.future.asCompletableFuture
 
 class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     val config = Configuration()
-    val classPath = CompilerClassPath(config.compiler)
+    private val compilerTmpDir = TempFile.createDirectory()
+    private val scope = CoroutineScope(
+        Dispatchers.Default
+        + CoroutineName("kotlin-lsp-worker")
+        + Job())
+    val classPath = CompilerClassPath(config.compiler, compilerTmpDir.file, scope)
 
     private val tempDirectory = TemporaryDirectory()
     private val uriContentProvider = URIContentProvider(ClassContentProvider(config.externalSources, classPath, tempDirectory, CompositeSourceArchiveProvider(JdkSourceArchiveProvider(classPath), ClassPathSourceArchiveProvider(classPath))))
-    val sourcePath = SourcePath(classPath, uriContentProvider, config.indexing)
+    val sourcePath = SourcePath(classPath, uriContentProvider, config.indexing, scope)
     val sourceFiles = SourceFiles(sourcePath, uriContentProvider)
 
-    private val textDocuments = KotlinTextDocumentService(sourceFiles, sourcePath, config, tempDirectory, uriContentProvider, classPath)
+    private val textDocuments = KotlinTextDocumentService(
+        sourceFiles,
+        sourcePath,
+        config,
+        tempDirectory,
+        uriContentProvider,
+        classPath,
+        scope)
     private val workspaces = KotlinWorkspaceService(sourceFiles, sourcePath, classPath, textDocuments, config)
-    private val protocolExtensions = KotlinProtocolExtensionService(uriContentProvider, classPath, sourcePath)
+    private val protocolExtensions = KotlinProtocolExtensionService(uriContentProvider, classPath, sourcePath, scope)
 
     private lateinit var client: LanguageClient
 
-    private val async = AsyncExecutor()
     private var progressFactory: Progress.Factory = Progress.Factory.None
         set(factory: Progress.Factory) {
             field = factory
@@ -67,7 +80,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     @JsonDelegate
     fun getProtocolExtensionService(): KotlinProtocolExtensions = protocolExtensions
 
-    override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> = async.compute {
+    override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> = scope.async {
         val serverCapabilities = ServerCapabilities().apply {
             setTextDocumentSync(TextDocumentSyncKind.Incremental)
             workspace = WorkspaceServerCapabilities().apply {
@@ -134,7 +147,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
         val serverInfo = ServerInfo("Kotlin Language Server", VERSION)
 
         InitializeResult(serverCapabilities, serverInfo)
-    }
+    }.asCompletableFuture()
 
     private fun connectLoggingBackend() {
         val backend: (LogMessage) -> Unit = {
@@ -158,7 +171,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
         textDocumentService.close()
         classPath.close()
         tempDirectory.close()
-        async.shutdown(awaitTermination = true)
+        compilerTmpDir.close()
     }
 
     override fun shutdown(): CompletableFuture<Any> {

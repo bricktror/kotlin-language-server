@@ -11,6 +11,7 @@ import java.nio.file.Files
  * temp files in the directory can easily be disposed
  * of once no longer needed.
  */
+@Deprecated("Use TempFile instead")
 class TemporaryDirectory(prefix: String = "kotlinlangserver") : Closeable {
     private val dirPath: Path = Files.createTempDirectory(prefix)
 

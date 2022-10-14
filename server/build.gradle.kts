@@ -30,6 +30,9 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-dao:${Versions.exposed}")
     implementation("org.jetbrains.exposed:exposed-jdbc:${Versions.exposed}")
 
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:${Versions.coroutines}")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:${Versions.coroutines}")
+
     implementation("org.jetbrains:fernflower:1.0")
     implementation("com.h2database:h2:1.4.200")
     implementation("com.github.fwcd.ktfmt:ktfmt:b5d31d1")

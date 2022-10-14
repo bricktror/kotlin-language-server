@@ -1,7 +1,6 @@
 package org.javacs.kt
 
 import org.javacs.kt.compiler.CompilationKind
-import org.javacs.kt.util.AsyncExecutor
 import org.javacs.kt.util.fileExtension
 import org.javacs.kt.util.filePath
 import org.javacs.kt.util.describeURI
@@ -14,6 +13,8 @@ import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.CompositeBindingContext
 import org.jetbrains.kotlin.resolve.scopes.DescriptorKindFilter
 import kotlin.concurrent.withLock
+import kotlin.coroutines.*
+import kotlinx.coroutines.*
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.net.URI
@@ -22,12 +23,12 @@ import java.util.concurrent.locks.ReentrantLock
 class SourcePath(
     private val cp: CompilerClassPath,
     private val contentProvider: URIContentProvider,
-    private val indexingConfig: IndexingConfiguration
+    private val indexingConfig: IndexingConfiguration,
+    private val scope: CoroutineScope,
 ) {
     private val files = mutableMapOf<URI, SourceFile>()
     private val parseDataWriteLock = ReentrantLock()
 
-    private val indexAsync = AsyncExecutor()
     var indexEnabled: Boolean by indexingConfig::enabled
     val index = SymbolIndex()
 
@@ -287,35 +288,31 @@ class SourcePath(
         files.keys.forEach { save(it) }
     }
 
+    /**
+     * Refreshes the indexes. If already done, refreshes only the declarations in the files that were changed.
+     */
     fun refreshDependencyIndexes() {
         compileAllFiles()
+        if(!indexEnabled) return
+        val module = files.values.map{it.module}.first{it!=null} ?: return
 
-        val module = files.values.first { it.module != null }.module
-        if (module != null) {
-            refreshDependencyIndexes(module)
+        scope.launch {
+            index.refresh(
+                module,
+                getDeclarationDescriptors(files.values))
         }
     }
 
     /**
      * Refreshes the indexes. If already done, refreshes only the declarations in the files that were changed.
      */
-    private fun refreshWorkspaceIndexes(oldFiles: List<SourceFile>, newFiles: List<SourceFile>) = indexAsync.execute {
+    private fun refreshWorkspaceIndexes(oldFiles: List<SourceFile>, newFiles: List<SourceFile>) = scope.launch {
         if (indexEnabled) {
             val oldDeclarations = getDeclarationDescriptors(oldFiles)
             val newDeclarations = getDeclarationDescriptors(newFiles)
 
             // Index the new declarations in the Kotlin source files that were just compiled, removing the old ones
             index.updateIndexes(oldDeclarations, newDeclarations)
-        }
-    }
-
-    /**
-     * Refreshes the indexes. If already done, refreshes only the declarations in the files that were changed.
-     */
-    private fun refreshDependencyIndexes(module: ModuleDescriptor) = indexAsync.execute {
-        if (indexEnabled) {
-            val declarations = getDeclarationDescriptors(files.values)
-            index.refresh(module, declarations)
         }
     }
 
