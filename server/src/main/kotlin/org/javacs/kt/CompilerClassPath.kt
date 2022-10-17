@@ -51,7 +51,7 @@ class CompilerClassPath(
         var refreshCompiler = updateJavaSourcePath
 
         if (updateClassPath) {
-            val newClassPath = resolver.classpathOrEmpty
+            val newClassPath = resolver.classpath
             if (newClassPath != classPath) {
                 synchronized(classPath) {
                     syncPaths(classPath, newClassPath, "class path") { it.compiledJar }
@@ -59,8 +59,8 @@ class CompilerClassPath(
                 refreshCompiler = true
             }
 
-            async.compute {
-                val newClassPathWithSources = resolver.classpathWithSources
+            scope.launch {
+                val newClassPathWithSources = resolver.classpath
                 synchronized(classPath) {
                     syncPaths(classPath, newClassPathWithSources, "class path with sources") { it.compiledJar }
                 }
@@ -69,7 +69,9 @@ class CompilerClassPath(
 
         if (updateBuildScriptClassPath) {
             LOG.info("Update build script path")
-            val newBuildScriptClassPath = resolver.buildScriptClasspathOrEmpty
+            val newBuildScriptClassPath = resolver.buildScriptClasspath
+                .map { it.compiledJar }
+                .toSet()
             if (newBuildScriptClassPath != buildScriptClassPath) {
                 syncPaths(buildScriptClassPath, newBuildScriptClassPath, "build script class path") { it }
                 refreshCompiler = true

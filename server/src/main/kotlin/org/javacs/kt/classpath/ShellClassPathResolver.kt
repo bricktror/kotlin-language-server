@@ -12,7 +12,6 @@ internal class ShellClassPathResolver(
     private val script: Path,
     private val workingDir: Path? = null
 ) : ClassPathResolver {
-    override val resolverType: String = "Shell"
     override val classpath: Set<ClassPathEntry> get() {
         val workingDirectory = workingDir?.toFile() ?: script.toAbsolutePath().parent.toFile()
         val cmd = script.toString()
@@ -24,7 +23,7 @@ internal class ShellClassPathResolver(
             .asSequence()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
-            .map { ClassPathEntry(Paths.get(it), null) }
+            .map { ClassPathEntry(Paths.get(it)) }
             .toSet()
     }
 
@@ -34,7 +33,7 @@ internal class ShellClassPathResolver(
         /** Create a shell resolver if a file is a pom. */
         fun maybeCreate(file: Path): ShellClassPathResolver? =
             file.takeIf { scriptExtensions.any { file.endsWith("kotlinLspClasspath.$it") } }
-                ?.let { ShellClassPathResolver(it) }
+                ?.let (::ShellClassPathResolver)
 
         /** The root directory for config files. */
         private val globalConfigRoot: Path =

@@ -10,31 +10,32 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
-internal class GradleClassPathResolver(private val path: Path, private val includeKotlinDSL: Boolean): ClassPathResolver {
-    override val resolverType: String = "Gradle"
+internal class GradleClassPathResolver(private val path: Path): ClassPathResolver {
     private val projectDirectory: Path get() = path.getParent()
 
     override val classpath: Set<ClassPathEntry> get() =
         readDependenciesViaGradleCLI(
                 projectDirectory,
-                gradleScripts=listOf("projectClassPathFinder.gradle.kts"),
+                gradleScripts=listOf("kotlinDSLClassPathFinder.gradle.kts"),
                 gradleTasks=listOf("kotlinLSPProjectDeps"))
             .apply { if (isNotEmpty()) LOG.info("Successfully resolved dependencies for '${projectDirectory.fileName}' using Gradle") }
-            .map { ClassPathEntry(it, null) }.toSet()
+            .map { ClassPathEntry(it) }
+            .toSet()
 
-    override val buildScriptClasspath: Set<Path> get() =
-        if (!includeKotlinDSL) emptySet()
-        else readDependenciesViaGradleCLI(
+    override val buildScriptClasspath: Set<ClassPathEntry> get() =
+        readDependenciesViaGradleCLI(
                 projectDirectory,
                 gradleScripts=listOf("kotlinDSLClassPathFinder.gradle.kts"),
                 gradleTasks=listOf("kotlinLSPKotlinDSLDeps"))
             .apply { if (isNotEmpty()) LOG.info("Successfully resolved build script dependencies for '${projectDirectory.fileName}' using Gradle") }
+            .map { ClassPathEntry(it) }
+            .toSet()
 
     companion object {
         /** Create a Gradle resolver if a file is a pom. */
         fun maybeCreate(file: Path): GradleClassPathResolver? =
             file.takeIf { file.endsWith("build.gradle") || file.endsWith("build.gradle.kts") }
-                ?.let { GradleClassPathResolver(it, includeKotlinDSL = file.toString().endsWith(".kts")) }
+                ?.let(::GradleClassPathResolver)
     }
 }
 
@@ -99,16 +100,15 @@ private fun findGradleCLIDependencies(command: List<String>, projectDirectory: P
             }
         }
     }
+    LOG.trace(result)
     return parseGradleCLIDependencies(result)
 }
 
 private val artifactPattern by lazy { "kotlin-lsp-gradle (.+)(?:\r?\n)".toRegex() }
 private val gradleErrorWherePattern by lazy { "\\*\\s+Where:[\r\n]+(\\S\\.*)".toRegex() }
 
-private fun parseGradleCLIDependencies(output: String): Set<Path>? {
-    LOG.debug(output)
-    val artifacts = artifactPattern.findAll(output)
+private fun parseGradleCLIDependencies(output: String): Set<Path>? =
+    artifactPattern.findAll(output)
         .mapNotNull { Paths.get(it.groups[1]?.value) }
         .filterNotNull()
-    return artifacts.toSet()
-}
+        .toSet()

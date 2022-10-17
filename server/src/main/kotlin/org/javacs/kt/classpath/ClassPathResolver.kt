@@ -5,63 +5,48 @@ import java.nio.file.Path
 
 /** A source for creating class paths */
 interface ClassPathResolver {
-    val resolverType: String
-
     val classpath: Set<ClassPathEntry> // may throw exceptions
-    val classpathOrEmpty: Set<ClassPathEntry> // does not throw exceptions
-        get() = try {
-            classpath
-        } catch (e: Exception) {
-            LOG.warn("Could not resolve classpath using {}: {}", resolverType, e.message)
-            emptySet<ClassPathEntry>()
-        }
 
-    val buildScriptClasspath: Set<Path>
-        get() = emptySet<Path>()
-    val buildScriptClasspathOrEmpty: Set<Path>
-        get() = try {
-            buildScriptClasspath
-        } catch (e: Exception) {
-            LOG.warn("Could not resolve buildscript classpath using {}: {}", resolverType, e.message)
-            emptySet<Path>()
-        }
-
-    val classpathWithSources: Set<ClassPathEntry> get() = classpath
+    val buildScriptClasspath: Set<ClassPathEntry>
+        get() = emptySet<ClassPathEntry>()
 
     companion object {
         /** A default empty classpath implementation */
         val empty = object : ClassPathResolver {
-            override val resolverType = "[]"
             override val classpath = emptySet<ClassPathEntry>()
         }
     }
 }
 
-val Sequence<ClassPathResolver>.joined get() = fold(ClassPathResolver.empty) { accum, next -> accum + next }
+data class ClassPathEntry(
+    val compiledJar: Path,
+    val sourceJar: Path? = null
+)
 
-val Collection<ClassPathResolver>.joined get() = fold(ClassPathResolver.empty) { accum, next -> accum + next }
+fun Sequence<ClassPathResolver>.flatten()
+    = fold(ClassPathResolver.empty) { accum, next -> accum + next }
 
 /** Combines two classpath resolvers. */
-operator fun ClassPathResolver.plus(other: ClassPathResolver): ClassPathResolver = UnionClassPathResolver(this, other)
+operator fun ClassPathResolver.plus(other: ClassPathResolver): ClassPathResolver
+    = CompositeClassPathResolver(this, other) { a,b -> a + b }
 
 /** Uses the left-hand classpath if not empty, otherwise uses the right. */
-infix fun ClassPathResolver.or(other: ClassPathResolver): ClassPathResolver = FirstNonEmptyClassPathResolver(this, other)
+fun ClassPathResolver.or(other: ClassPathResolver): ClassPathResolver
+    = CompositeClassPathResolver(this, other) { a,b -> a.takeIf{it.isNotEmpty()} ?: b}
 
-/** The union of two class path resolvers. */
-internal class UnionClassPathResolver(val lhs: ClassPathResolver, val rhs: ClassPathResolver) : ClassPathResolver {
-    override val resolverType: String get() = "(${lhs.resolverType} + ${rhs.resolverType})"
-    override val classpath get() = lhs.classpath + rhs.classpath
-    override val classpathOrEmpty get() = lhs.classpathOrEmpty + rhs.classpathOrEmpty
-    override val buildScriptClasspath get() = lhs.buildScriptClasspath + rhs.buildScriptClasspath
-    override val buildScriptClasspathOrEmpty get() = lhs.buildScriptClasspathOrEmpty + rhs.buildScriptClasspathOrEmpty
-    override val classpathWithSources = lhs.classpathWithSources + rhs.classpathWithSources
+class DecoratedClassPathResolver(
+    val inner: ClassPathResolver,
+    val op: (Set<ClassPathEntry>) -> Set<ClassPathEntry>
+): ClassPathResolver {
+    override val classpath get() = op(inner.classpath)
+    override val buildScriptClasspath get() = op(inner.buildScriptClasspath)
 }
 
-internal class FirstNonEmptyClassPathResolver(val lhs: ClassPathResolver, val rhs: ClassPathResolver) : ClassPathResolver {
-    override val resolverType: String get() = "(${lhs.resolverType} or ${rhs.resolverType})"
-    override val classpath get() = lhs.classpath.takeIf { it.isNotEmpty() } ?: rhs.classpath
-    override val classpathOrEmpty get() = lhs.classpathOrEmpty.takeIf { it.isNotEmpty() } ?: rhs.classpathOrEmpty
-    override val buildScriptClasspath get() = lhs.buildScriptClasspath.takeIf { it.isNotEmpty() } ?: rhs.buildScriptClasspath
-    override val buildScriptClasspathOrEmpty get() = lhs.buildScriptClasspathOrEmpty.takeIf { it.isNotEmpty() } ?: rhs.buildScriptClasspathOrEmpty
-    override val classpathWithSources = lhs.classpathWithSources.takeIf { it.isNotEmpty() } ?: rhs.classpathWithSources
+class CompositeClassPathResolver(
+    val lhs: ClassPathResolver,
+    val rhs: ClassPathResolver,
+    val join: (Set<ClassPathEntry>, Set<ClassPathEntry>) -> Set<ClassPathEntry>
+): ClassPathResolver {
+    override val classpath get() = join(lhs.classpath, rhs.classpath)
+    override val buildScriptClasspath get() = join(lhs.buildScriptClasspath, rhs.buildScriptClasspath)
 }
