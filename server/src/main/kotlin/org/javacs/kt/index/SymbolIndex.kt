@@ -6,8 +6,9 @@ import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.resolve.scopes.DescriptorKindFilter
 import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameSafe
 import org.jetbrains.kotlin.name.FqName
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 import org.javacs.kt.progress.Progress
+import org.javacs.kt.progress.create
 import org.jetbrains.exposed.dao.IntEntity
 import org.jetbrains.exposed.dao.IntEntityClass
 import org.jetbrains.exposed.dao.id.EntityID
@@ -78,10 +79,12 @@ class PositionEntity(id: EntityID<Int>) : IntEntity(id) {
 /**
  * A global view of all available symbols across all packages.
  */
-class SymbolIndex {
+class SymbolIndex(
+    val progressFactory: Progress.Factory
+) {
+    private val log by findLogger
     private val db = Database.connect("jdbc:h2:mem:symbolindex;DB_CLOSE_DELAY=-1", "org.h2.Driver")
 
-    var progressFactory: Progress.Factory = Progress.Factory.None
 
     init {
         transaction(db) {
@@ -92,30 +95,27 @@ class SymbolIndex {
     /** Rebuilds the entire index. May take a while. */
     fun refresh(module: ModuleDescriptor, exclusions: Sequence<DeclarationDescriptor>) {
         val started = System.currentTimeMillis()
-        LOG.info("Updating full symbol index...")
+        log.info("Updating full symbol index...")
 
-        progressFactory.create("Indexing").thenApplyAsync { progress ->
+        progressFactory.create("Indexing") {
             try {
                 transaction(db) {
                     addDeclarations(allDescriptors(module, exclusions))
 
                     val finished = System.currentTimeMillis()
                     val count = Symbols.slice(Symbols.fqName.count()).selectAll().first()[Symbols.fqName.count()]
-                    LOG.info("Updated full symbol index in ${finished - started} ms! (${count} symbol(s))")
+                    log.info{"Updated full symbol index in ${finished - started} ms! (${count} symbol(s))"}
                 }
             } catch (e: Exception) {
-                LOG.error("Error while updating symbol index")
-                LOG.printStackTrace(e)
+                log.error(e, "Error while updating symbol index")
             }
-
-            progress.close()
         }
     }
 
     // Removes a list of indexes and adds another list. Everything is done in the same transaction.
     fun updateIndexes(remove: Sequence<DeclarationDescriptor>, add: Sequence<DeclarationDescriptor>) {
         val started = System.currentTimeMillis()
-        LOG.info("Updating symbol index...")
+        log.info("Updating symbol index...")
 
         try {
             transaction(db) {
@@ -124,11 +124,10 @@ class SymbolIndex {
 
                 val finished = System.currentTimeMillis()
                 val count = Symbols.slice(Symbols.fqName.count()).selectAll().first()[Symbols.fqName.count()]
-                LOG.info("Updated symbol index in ${finished - started} ms! (${count} symbol(s))")
+                log.info{"Updated symbol index in ${finished - started} ms! (${count} symbol(s))"}
             }
         } catch (e: Exception) {
-            LOG.error("Error while updating symbol index")
-            LOG.printStackTrace(e)
+            log.error(e, "Error while updating symbol index")
         }
     }
 
@@ -141,7 +140,7 @@ class SymbolIndex {
                     (Symbols.fqName eq descriptorFqn.toString()) and (Symbols.extensionReceiverType eq extensionReceiverFqn?.toString())
                 }
             } else {
-                LOG.warn("Excluding symbol {} from index since its name is too long", descriptorFqn.toString())
+                log.warning{"Excluding symbol ${descriptorFqn.toString()} from index since its name is too long"}
             }
         }
 
@@ -158,7 +157,7 @@ class SymbolIndex {
                     extensionReceiverType = extensionReceiverFqn?.toString()
                 }
             } else {
-                LOG.warn("Excluding symbol {} from index since its name is too long", descriptorFqn.toString())
+                log.warning{"Excluding symbol ${descriptorFqn.toString()} from index since its name is too long"}
             }
         }
 
@@ -195,7 +194,7 @@ class SymbolIndex {
                     DescriptorKindFilter.ALL
                 ) { name -> !exclusions.any { declaration -> declaration.name == name } }
             } catch (e: IllegalStateException) {
-                LOG.warn("Could not query descriptors in package $it")
+                log.warning("Could not query descriptors in package $it")
                 emptyList()
             }
         }

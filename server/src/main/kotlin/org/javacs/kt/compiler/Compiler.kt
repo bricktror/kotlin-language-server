@@ -1,21 +1,55 @@
 package org.javacs.kt.compiler
 
+
 import com.intellij.lang.Language
+import com.intellij.lang.java.JavaLanguage
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.StandardFileSystems
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.VirtualFileSystem
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiFileFactory
+import java.io.Closeable
+import java.io.File
+import java.net.URLClassLoader
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import kotlin.script.dependencies.Environment
+import kotlin.script.dependencies.ScriptContents
+import kotlin.script.experimental.dependencies.DependenciesResolver
+import kotlin.script.experimental.dependencies.DependenciesResolver.ResolveResult
+import kotlin.script.experimental.dependencies.ScriptDependencies
+import kotlin.script.experimental.host.ScriptingHostConfiguration
+import kotlin.script.experimental.host.configurationDependencies
+import kotlin.script.experimental.jvm.JvmDependency
+import kotlin.script.experimental.jvm.defaultJvmScriptingHostConfiguration
+import org.javacs.kt.CompilerConfiguration
+import org.javacs.kt.j2k.JavaElementConverter
+import org.javacs.kt.logging.*
+import org.javacs.kt.util.KotlinLSException
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
 import org.jetbrains.kotlin.cli.common.environment.setIdeaIoUseFallback
+import org.jetbrains.kotlin.cli.common.output.writeAllTo
+import org.jetbrains.kotlin.cli.jvm.compiler.CliBindingTrace
+import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
+import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
+import org.jetbrains.kotlin.cli.jvm.compiler.TopDownAnalyzerFacadeForJVM
 import org.jetbrains.kotlin.cli.jvm.config.addJavaSourceRoots
 import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoots
+import org.jetbrains.kotlin.codegen.ClassBuilderFactories
+import org.jetbrains.kotlin.codegen.KotlinCodegenFacade
+import org.jetbrains.kotlin.codegen.state.GenerationState
+import org.jetbrains.kotlin.compiler.plugin.ComponentRegistrar
+import org.jetbrains.kotlin.config.*
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.CompilerConfiguration as KotlinCompilerConfiguration
 import org.jetbrains.kotlin.container.ComponentProvider
 import org.jetbrains.kotlin.container.get
-import org.jetbrains.kotlin.compiler.plugin.ComponentRegistrar
+import org.jetbrains.kotlin.container.getService
+import org.jetbrains.kotlin.descriptors.ModuleDescriptor
+import org.jetbrains.kotlin.extensions.StorageComponentContainerContributor
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.metadata.jvm.deserialization.JvmProtoBufUtil
 import org.jetbrains.kotlin.psi.*
@@ -26,53 +60,20 @@ import org.jetbrains.kotlin.resolve.TopDownAnalysisMode
 import org.jetbrains.kotlin.resolve.calls.components.InferenceSession
 import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowInfo
 import org.jetbrains.kotlin.resolve.lazy.declarations.FileBasedDeclarationProviderFactory
+import org.jetbrains.kotlin.resolve.scopes.LexicalScope
+import org.jetbrains.kotlin.samWithReceiver.CliSamWithReceiverComponentContributor
 import org.jetbrains.kotlin.scripting.compiler.plugin.ScriptingCompilerConfigurationComponentRegistrar
 import org.jetbrains.kotlin.scripting.compiler.plugin.definitions.CliScriptDefinitionProvider
 import org.jetbrains.kotlin.scripting.configuration.ScriptingConfigurationKeys
-import org.jetbrains.kotlin.scripting.definitions.ScriptDefinitionProvider
-import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
 import org.jetbrains.kotlin.scripting.definitions.KotlinScriptDefinition // Legacy
+import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
+import org.jetbrains.kotlin.scripting.definitions.ScriptDefinitionProvider
 import org.jetbrains.kotlin.scripting.definitions.findScriptDefinition
 import org.jetbrains.kotlin.scripting.definitions.getEnvironment
 import org.jetbrains.kotlin.scripting.resolve.KotlinScriptDefinitionFromAnnotatedTemplate
 import org.jetbrains.kotlin.types.TypeUtils
 import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
 import org.jetbrains.kotlin.util.KotlinFrontEndException
-import java.io.Closeable
-import java.nio.file.Path
-import java.nio.file.Paths
-import java.net.URLClassLoader
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
-import kotlin.script.dependencies.Environment
-import kotlin.script.dependencies.ScriptContents
-import kotlin.script.experimental.dependencies.ScriptDependencies
-import kotlin.script.experimental.dependencies.DependenciesResolver
-import kotlin.script.experimental.dependencies.DependenciesResolver.ResolveResult
-import kotlin.script.experimental.host.ScriptingHostConfiguration
-import kotlin.script.experimental.host.configurationDependencies
-import kotlin.script.experimental.jvm.defaultJvmScriptingHostConfiguration
-import kotlin.script.experimental.jvm.JvmDependency
-import org.javacs.kt.LOG
-import org.javacs.kt.CompilerConfiguration
-import org.javacs.kt.util.KotlinLSException
-import org.javacs.kt.util.LoggingMessageCollector
-import org.jetbrains.kotlin.cli.common.output.writeAllTo
-import org.jetbrains.kotlin.codegen.ClassBuilderFactories
-import org.jetbrains.kotlin.codegen.KotlinCodegenFacade
-import org.jetbrains.kotlin.codegen.state.GenerationState
-import org.jetbrains.kotlin.container.getService
-import org.jetbrains.kotlin.descriptors.ModuleDescriptor
-import org.jetbrains.kotlin.cli.jvm.compiler.CliBindingTrace
-import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
-import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
-import org.jetbrains.kotlin.cli.jvm.compiler.TopDownAnalyzerFacadeForJVM
-import org.jetbrains.kotlin.config.*
-import org.jetbrains.kotlin.resolve.scopes.LexicalScope
-import org.jetbrains.kotlin.samWithReceiver.CliSamWithReceiverComponentContributor
-import org.jetbrains.kotlin.extensions.StorageComponentContainerContributor
-import java.io.File
-
 private val GRADLE_DSL_DEPENDENCY_PATTERN = Regex("^gradle-(?:kotlin-dsl|core).*\\.jar$")
 
 /**
@@ -84,6 +85,7 @@ private class CompilationEnvironment(
     classPath: Set<Path>
 ) : Closeable {
     private val disposable = Disposer.newDisposable()
+    private val log by findLogger
 
     val environment: KotlinCoreEnvironment
     val parser: KtPsiFactory
@@ -107,7 +109,7 @@ private class CompilationEnvironment(
 
                 put(CommonConfigurationKeys.MODULE_NAME, JvmProtoBufUtil.DEFAULT_MODULE_NAME)
                 put(CommonConfigurationKeys.LANGUAGE_VERSION_SETTINGS, languageVersionSettings)
-                put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, LoggingMessageCollector)
+                put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, LoggingMessageCollector(log))
                 add(ComponentRegistrar.PLUGIN_COMPONENT_REGISTRARS, ScriptingCompilerConfigurationComponentRegistrar())
                 put(JVMConfigurationKeys.USE_PSI_CLASS_FILES_READING, true)
 
@@ -118,7 +120,7 @@ private class CompilationEnvironment(
                 val scriptDefinitions: MutableList<ScriptDefinition> = mutableListOf(ScriptDefinition.getDefault(defaultJvmScriptingHostConfiguration))
 
                 if (classPath.any { GRADLE_DSL_DEPENDENCY_PATTERN.matches(it.fileName.toString()) }) {
-                    LOG.info("Configuring Kotlin DSL script templates...")
+                    log.info("Configuring Kotlin DSL script templates...")
 
                     val scriptTemplates = listOf(
                         "org.gradle.kotlin.dsl.KotlinInitScript",
@@ -376,12 +378,11 @@ private class CompilationEnvironment(
                             }
                         }) })
                     } catch (e: Exception) {
-                        LOG.error("Error while loading script template classes")
-                        LOG.printStackTrace(e)
+                        log.error(e, "Error while loading script template classes")
                     }
                 }
 
-                LOG.info("Adding script definitions ${scriptDefinitions.map { it.asLegacyOrNull<KotlinScriptDefinition>()?.template?.simpleName }}")
+                log.info{"Adding script definitions ${scriptDefinitions.map { it.asLegacyOrNull<KotlinScriptDefinition>()?.template?.simpleName }}"}
                 addAll(ScriptingConfigurationKeys.SCRIPT_DEFINITIONS, scriptDefinitions)
             },
             configFiles = EnvironmentConfigFiles.JVM_CONFIG_FILES
@@ -437,12 +438,20 @@ enum class CompilationKind {
  * Incrementally compiles files and expressions.
  * The basic strategy for compiling one file at-a-time is outlined in OneFilePerformance.
  */
-class Compiler(javaSourcePath: Set<Path>, classPath: Set<Path>, buildScriptClassPath: Set<Path> = emptySet(), private val outputDirectory: File) : Closeable {
+class Compiler(
+    javaSourcePath: Set<Path>,
+    classPath: Set<Path>,
+    buildScriptClassPath: Set<Path> = emptySet(),
+    private val outputDirectory: File
+) : Closeable {
+    private val log by findLogger
     private var closed = false
     private val localFileSystem: VirtualFileSystem
 
     private val defaultCompileEnvironment = CompilationEnvironment(javaSourcePath, classPath)
-    private val buildScriptCompileEnvironment = buildScriptClassPath.takeIf { it.isNotEmpty() }?.let { CompilationEnvironment(emptySet(), it) }
+    private val buildScriptCompileEnvironment = buildScriptClassPath
+        .takeIf { it.isNotEmpty() }
+        ?.let { CompilationEnvironment(emptySet(), it) }
     private val compileLock = ReentrantLock() // TODO: Lock at file-level
 
     companion object {
@@ -464,25 +473,50 @@ class Compiler(javaSourcePath: Set<Path>, classPath: Set<Path>, buildScriptClass
         buildScriptCompileEnvironment?.updateConfiguration(config)
     }
 
-    fun createPsiFile(content: String, file: Path = Paths.get("dummy.virtual.kt"), language: Language = KotlinLanguage.INSTANCE, kind: CompilationKind = CompilationKind.DEFAULT): PsiFile {
-        assert(!content.contains('\r'))
+    private fun createPsiFile(
+        content: String,
+        name: String,
+        language: Language,
+        kind: CompilationKind = CompilationKind.DEFAULT
+    ): PsiFile = compileEnvironmentFor(kind)
+        .let { PsiFileFactory.getInstance(it.environment.project) }
+        .createFileFromText(name, language, content.replace("\r", ""), true, false)
+        .also { assert(it.virtualFile != null) }
 
-        val new = psiFileFactoryFor(kind).createFileFromText(file.toString(), language, content, true, false)
-        assert(new.virtualFile != null)
+    fun transpileJavaToKotlin(
+        content: String,
+    ) = createPsiFile(
+        name="snippet.java",
+        content=content,
+        language = JavaLanguage.INSTANCE,
+        kind = CompilationKind.DEFAULT
+    ).let(JavaElementConverter::transpileToKt)
 
-        return new
-    }
+    fun createKtFile(
+        content: String,
+        name: Path,
+        kind: CompilationKind = CompilationKind.DEFAULT
+    ) = createPsiFile(
+        content=content,
+        name=name.toString(),
+        language = KotlinLanguage.INSTANCE,
+        kind = kind
+    ) as KtFile
 
-    fun createKtFile(content: String, file: Path = Paths.get("dummy.virtual.kt"), kind: CompilationKind = CompilationKind.DEFAULT): KtFile =
-            createPsiFile(content, file, language = KotlinLanguage.INSTANCE, kind = kind) as KtFile
-
-    fun createKtExpression(content: String, file: Path = Paths.get("dummy.virtual.kt"), kind: CompilationKind = CompilationKind.DEFAULT): KtExpression {
-        val property = createKtDeclaration("val x = $content", file, kind) as KtProperty
+    fun createKtExpression(content: String, name: Path = Paths.get("dummy.virtual.kt"), kind: CompilationKind = CompilationKind.DEFAULT): KtExpression {
+        val property = createKtDeclaration("val x = $content", name, kind) as KtProperty
         return property.initializer!!
     }
 
-    fun createKtDeclaration(content: String, file: Path = Paths.get("dummy.virtual.kt"), kind: CompilationKind = CompilationKind.DEFAULT): KtDeclaration {
-        val parse = createKtFile(content, file, kind)
+    fun createKtDeclaration(
+        content: String,
+        file: Path = Paths.get("dummy.virtual.kt"),
+        kind: CompilationKind = CompilationKind.DEFAULT
+    ): KtDeclaration {
+        val parse = createKtFile(
+            content,
+            file,
+            kind)
         val declarations = parse.declarations
 
         assert(declarations.size == 1) { "${declarations.size} declarations in $content" }
@@ -504,21 +538,18 @@ class Compiler(javaSourcePath: Set<Path>, classPath: Set<Path>, buildScriptClass
         CompilationKind.BUILD_SCRIPT -> buildScriptCompileEnvironment ?: defaultCompileEnvironment
     }
 
-    fun psiFileFactoryFor(kind: CompilationKind): PsiFileFactory =
-        PsiFileFactory.getInstance(compileEnvironmentFor(kind).environment.project)
-
     fun compileKtFile(file: KtFile, sourcePath: Collection<KtFile>, kind: CompilationKind = CompilationKind.DEFAULT): Pair<BindingContext, ModuleDescriptor> =
         compileKtFiles(listOf(file), sourcePath, kind)
 
     fun compileKtFiles(files: Collection<KtFile>, sourcePath: Collection<KtFile>, kind: CompilationKind = CompilationKind.DEFAULT): Pair<BindingContext, ModuleDescriptor> {
         if (kind == CompilationKind.BUILD_SCRIPT) {
             // Print the (legacy) script template used by the compiled Kotlin DSL build file
-            files.forEach { LOG.debug { "$it -> ScriptDefinition: ${it.findScriptDefinition()?.asLegacyOrNull<KotlinScriptDefinition>()?.template?.simpleName}" } }
+            files.forEach { log.debug { "$it -> ScriptDefinition: ${it.findScriptDefinition()?.asLegacyOrNull<KotlinScriptDefinition>()?.template?.simpleName}" } }
         }
 
         compileLock.withLock {
-            val compileEnv = compileEnvironmentFor(kind)
-            val (container, trace) = compileEnv.createContainer(sourcePath)
+            val (container, trace) = compileEnvironmentFor(kind)
+                .createContainer(sourcePath)
             val module = container.getService(ModuleDescriptor::class.java)
             container.get<LazyTopDownAnalyzer>().analyzeDeclarations(TopDownAnalysisMode.TopLevelDeclarations, files)
             return Pair(trace.bindingContext, module)
@@ -581,7 +612,7 @@ class Compiler(javaSourcePath: Set<Path>, classPath: Set<Path>, buildScriptClass
             buildScriptCompileEnvironment?.close()
             closed = true
         } else {
-            LOG.warn("Compiler is already closed!")
+            log.warning("Compiler is already closed!")
         }
     }
 }

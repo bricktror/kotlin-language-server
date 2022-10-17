@@ -5,7 +5,6 @@ import org.eclipse.lsp4j.Range
 import java.nio.file.Path
 import org.javacs.kt.CompiledFile
 import org.javacs.kt.CompilerClassPath
-import org.javacs.kt.LOG
 import org.javacs.kt.ExternalSourcesConfiguration
 import org.javacs.kt.externalsources.ClassContentProvider
 import org.javacs.kt.externalsources.toKlsURI
@@ -21,6 +20,9 @@ import org.jetbrains.kotlin.psi.KtNamedDeclaration
 import org.jetbrains.kotlin.descriptors.ConstructorDescriptor
 import java.io.File
 import java.nio.file.Paths
+import org.javacs.kt.logging.*
+
+private val log by findLogger.atToplevel(object{})
 
 private val cachedTempFiles = mutableMapOf<KlsURI, Path>()
 private val definitionPattern = Regex("(?:class|interface|object|fun)\\s+(\\w+)")
@@ -35,7 +37,7 @@ fun goToDefinition(
 ): Location? {
     val (_, target) = file.referenceExpressionAtPoint(cursor) ?: return null
 
-    LOG.info("Found declaration descriptor {}", target)
+    log.info("Found declaration descriptor ${target}")
     var destination = location(target)
     val psi = target.findPsi()
 

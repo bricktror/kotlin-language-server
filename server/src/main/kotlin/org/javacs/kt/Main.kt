@@ -7,6 +7,7 @@ import org.eclipse.lsp4j.launch.LSPLauncher
 import org.javacs.kt.util.ExitingInputStream
 import org.javacs.kt.util.tcpStartServer
 import org.javacs.kt.util.tcpConnectToClient
+import org.javacs.kt.logging.*
 
 class Args {
     /*
@@ -26,20 +27,21 @@ class Args {
 
 fun main(argv: Array<String>) {
     // Redirect java.util.logging calls (e.g. from LSP4J)
-    LOG.connectJULFrontend()
+    val loggerTarget = DelegateLoggerTarget(QueueLoggerTarget())
+    LoggerTargetJulHandler.install(loggerTarget)
 
     val args = Args().also { JCommander.newBuilder().addObject(it).build().parse(*argv) }
     val (inStream, outStream) = args.tcpClientPort?.let {
         // Launch as TCP Client
-        LOG.connectStdioBackend()
+        loggerTarget.inner=FunctionLoggerTarget{ println(it.message) }
         tcpConnectToClient(args.tcpClientHost, it)
     } ?: args.tcpServerPort?.let {
         // Launch as TCP Server
-        LOG.connectStdioBackend()
+        loggerTarget.inner=FunctionLoggerTarget{ println(it.message) }
         tcpStartServer(it)
     } ?: Pair(System.`in`, System.out)
 
-    val server = KotlinLanguageServer()
+    val server = KotlinLanguageServer(loggerTarget)
     val threads = Executors.newSingleThreadExecutor { Thread(it, "client") }
     val launcher = LSPLauncher.createServerLauncher(server, ExitingInputStream(inStream), outStream, threads) { it }
 

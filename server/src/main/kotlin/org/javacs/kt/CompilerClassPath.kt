@@ -11,6 +11,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.*
 import kotlin.coroutines.*
+import org.javacs.kt.logging.*
+
 
 /**
  * Manages the class path (compiled JARs, etc), the Java source path
@@ -21,6 +23,7 @@ class CompilerClassPath(
     val outputDirectory: File,
     private val scope: CoroutineScope,
 ) : Closeable {
+    private val log by findLogger
     val workspaceRoots = mutableSetOf<Path>()
 
     private val javaSourcePath = mutableSetOf<Path>()
@@ -68,7 +71,7 @@ class CompilerClassPath(
         }
 
         if (updateBuildScriptClassPath) {
-            LOG.info("Update build script path")
+            log.info("Update build script path")
             val newBuildScriptClassPath = resolver.buildScriptClasspath
                 .map { it.compiledJar }
                 .toSet()
@@ -79,7 +82,7 @@ class CompilerClassPath(
         }
 
         if (refreshCompiler) {
-            LOG.info("Reinstantiating compiler")
+            log.info("Reinstantiating compiler")
             compiler.close()
             compiler = Compiler(javaSourcePath, classPath.map { it.compiledJar }.toSet(), buildScriptClassPath, outputDirectory)
             updateCompilerConfiguration()
@@ -105,7 +108,7 @@ class CompilerClassPath(
     }
 
     fun addWorkspaceRoot(root: Path): Boolean {
-        LOG.info("Searching for dependencies and Java sources in workspace root {}", root)
+        log.info("Searching for dependencies and Java sources in workspace root ${root}")
 
         workspaceRoots.add(root)
         javaSourcePath.addAll(findJavaSourceFiles(root))
@@ -114,7 +117,7 @@ class CompilerClassPath(
     }
 
     fun removeWorkspaceRoot(root: Path): Boolean {
-        LOG.info("Removing dependencies and Java source path from workspace root {}", root)
+        log.info("Removing dependencies and Java source path from workspace root ${root}")
 
         workspaceRoots.remove(root)
         javaSourcePath.removeAll(findJavaSourceFiles(root))
@@ -153,28 +156,28 @@ class CompilerClassPath(
     override fun close() {
         compiler.close()
     }
-}
 
-private fun findJavaSourceFiles(root: Path): Set<Path> {
-    val sourceMatcher = FileSystems.getDefault().getPathMatcher("glob:*.java")
-    return SourceExclusions(root)
-        .walkIncluded()
-        .filter { sourceMatcher.matches(it.fileName) }
-        .toSet()
-}
-
-private fun logAdded(sources: Collection<Path>, name: String) {
-    when {
-        sources.isEmpty() -> return
-        sources.size > 5 -> LOG.info("Adding {} files to {}", sources.size, name)
-        else -> LOG.info("Adding {} to {}", sources, name)
+    private fun findJavaSourceFiles(root: Path): Set<Path> {
+        val sourceMatcher = FileSystems.getDefault().getPathMatcher("glob:*.java")
+        return SourceExclusions(root)
+            .walkIncluded()
+            .filter { sourceMatcher.matches(it.fileName) }
+            .toSet()
     }
-}
 
-private fun logRemoved(sources: Collection<Path>, name: String) {
-    when {
-        sources.isEmpty() -> return
-        sources.size > 5 -> LOG.info("Removing {} files from {}", sources.size, name)
-        else -> LOG.info("Removing {} from {}", sources, name)
+    private fun logAdded(sources: Collection<Path>, name: String) {
+        when {
+            sources.isEmpty() -> return
+            sources.size > 5 -> log.info("Adding ${sources.size} files to ${name}")
+            else -> log.info("Adding ${sources} to ${name}")
+        }
+    }
+
+    private fun logRemoved(sources: Collection<Path>, name: String) {
+        when {
+            sources.isEmpty() -> return
+            sources.size > 5 -> log.info("Removing ${sources.size} files from ${name}")
+            else -> log.info("Removing ${sources} from ${name}")
+        }
     }
 }

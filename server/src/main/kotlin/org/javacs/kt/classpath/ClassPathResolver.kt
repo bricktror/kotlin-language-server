@@ -1,6 +1,5 @@
 package org.javacs.kt.classpath
 
-import org.javacs.kt.LOG
 import java.nio.file.Path
 
 /** A source for creating class paths */

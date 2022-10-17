@@ -1,6 +1,6 @@
 package org.javacs.kt.classpath
 
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 import org.javacs.kt.util.findCommandOnPath
 import org.javacs.kt.util.execAndReadStdoutAndStderr
 import org.javacs.kt.util.TempFile
@@ -10,6 +10,8 @@ import java.nio.file.Paths
 import java.nio.file.Files
 import java.io.File
 import java.io.Closeable
+
+private val log by findLogger.atToplevel(object{})
 
 /** Resolver for reading maven dependencies */
 internal class MavenClassPathResolver private constructor(private val pom: Path) : ClassPathResolver {
@@ -52,7 +54,7 @@ private fun generateMavenDependencyList(pom: Path)
              requireNotNull(
                 mvnCommandFromPath
                 ?: findProjectCommandWithName("mvnw", pom)
-                    ?.also { LOG.info("Using mvn wrapper (mvnw) in place of mvn command") }
+                    ?.also { log.info("Using mvn wrapper (mvnw) in place of mvn command") }
             ) { "Unable to find the 'mvn' command or suitable wrapper" }
         ).toString()
         val command= listOf(
@@ -61,11 +63,11 @@ private fun generateMavenDependencyList(pom: Path)
             "-DincludeScope=test",
             "-DoutputFile=$it",
             "-Dstyle.color=never")
-        LOG.info("Run {} in {}", command, workingDirectory)
+        log.info("Run ${command} in ${workingDirectory}")
         val (result, errors) = execAndReadStdoutAndStderr(command, workingDirectory)
-        LOG.debug(result)
+        log.debug(result)
         if ("BUILD FAILURE" in errors) {
-            LOG.warn("Maven task failed: {}", errors.lines().firstOrNull())
+            log.warning("Maven task failed: {errors.lines().firstOrNull()}")
         }
     }
     .let {
@@ -76,11 +78,11 @@ private fun generateMavenDependencyList(pom: Path)
 
 private fun runCommand(pom: Path, command: List<String>) {
     val workingDirectory = pom.toAbsolutePath().parent
-    LOG.info("Run {} in {}", command, workingDirectory)
+    log.info("Run ${command} in ${workingDirectory}")
     val (result, errors) = execAndReadStdoutAndStderr(command, workingDirectory)
-    LOG.debug(result)
+    log.debug(result)
     if ("BUILD FAILURE" in errors) {
-        LOG.warn("Maven task failed: {}", errors.lines().firstOrNull())
+        log.warning("Maven task failed: {errors.lines().firstOrNull()}")
     }
 }
 

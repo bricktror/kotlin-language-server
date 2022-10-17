@@ -1,9 +1,10 @@
 package org.javacs.kt.j2k
 
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 import com.intellij.psi.*
 
 object JavaTypeConverter : PsiTypeVisitor<String>() {
+    private val log by findLogger
     override fun visitType(type: PsiType): String {
         return type.presentableText
     }
@@ -16,7 +17,7 @@ object JavaTypeConverter : PsiTypeVisitor<String>() {
     override fun visitArrayType(arrayType: PsiArrayType): String = when (try {
         arrayType.componentType.canonicalText
     } catch (e: IllegalStateException) {
-        LOG.warn("Error while fetching text representation of array type: {}", e)
+        log.warning("Error while fetching text representation of array type: ${e}")
         "?"
     }) {
         "byte" -> "ByteArray"

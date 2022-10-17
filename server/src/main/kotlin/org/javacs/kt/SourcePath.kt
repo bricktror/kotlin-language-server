@@ -6,6 +6,7 @@ import org.javacs.kt.util.filePath
 import org.javacs.kt.util.describeURI
 import org.javacs.kt.index.SymbolIndex
 import org.javacs.kt.progress.Progress
+import org.javacs.kt.logging.*
 import com.intellij.lang.Language
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.psi.KtFile
@@ -25,20 +26,16 @@ class SourcePath(
     private val contentProvider: URIContentProvider,
     private val indexingConfig: IndexingConfiguration,
     private val scope: CoroutineScope,
+    progressFactory: Progress.Factory,
 ) {
+    private val log by findLogger
     private val files = mutableMapOf<URI, SourceFile>()
     private val parseDataWriteLock = ReentrantLock()
 
     var indexEnabled: Boolean by indexingConfig::enabled
-    val index = SymbolIndex()
+    val index = SymbolIndex(progressFactory)
 
     var beforeCompileCallback: () -> Unit = {}
-
-    var progressFactory: Progress.Factory = Progress.Factory.None
-        set(factory: Progress.Factory) {
-            field = factory
-            index.progressFactory = factory
-        }
 
     private inner class SourceFile(
         val uri: URI,
@@ -93,7 +90,7 @@ class SourcePath(
         fun compile() = parse().apply { doCompile() }
 
         private fun doCompile() {
-            LOG.debug("Compiling {}", path?.fileName)
+            log.debug{"Compiling ${path?.fileName}"}
 
             val oldFile = clone()
 
@@ -132,7 +129,7 @@ class SourcePath(
         if (uri !in files) {
             // Fallback solution, usually *all* source files
             // should be added/opened through SourceFiles
-            LOG.warn("Requested source file {} is not on source path, this is most likely a bug. Adding it now temporarily...", describeURI(uri))
+            log.warning{"Requested source file ${describeURI(uri)} is not on source path, this is most likely a bug. Adding it now temporarily..."}
             put(uri, contentProvider.contentOf(uri), null, temporary = true)
         }
         return files[uri]!!
@@ -142,7 +139,7 @@ class SourcePath(
         assert(!content.contains('\r'))
 
         if (temporary) {
-            LOG.info("Adding temporary source file {} to source path", describeURI(uri))
+            log.info{"Adding temporary source file ${describeURI(uri)} to source path"}
         }
 
         if (uri in files) {
@@ -154,7 +151,7 @@ class SourcePath(
 
     fun deleteIfTemporary(uri: URI): Boolean =
         if (sourceFile(uri).isTemporary) {
-            LOG.info("Removing temporary source file {} from source path", describeURI(uri))
+            log.info{"Removing temporary source file ${describeURI(uri)} from source path"}
             delete(uri)
             true
         } else {
@@ -257,7 +254,7 @@ class SourcePath(
             try {
                 compileFiles(listOf(it))
             } catch (ex: Exception) {
-                LOG.printStackTrace(ex)
+                log.error(ex, "Failed to compile file ${it}")
             }
         }
     }
@@ -267,19 +264,18 @@ class SourcePath(
      */
     fun save(uri: URI) {
         files[uri]?.let {
-            if (!it.isScript) {
-                // If the code generation fails for some reason, we generate code for the other files anyway
-                try {
-                    cp.compiler.removeGeneratedCode(listOfNotNull(it.lastSavedFile))
-                    it.module?.let { module ->
-                        it.compiledContext?.let { context ->
-                            cp.compiler.generateCode(module, context, listOfNotNull(it.compiledFile))
-                            it.lastSavedFile = it.compiledFile
-                        }
+            if(it.isScript) return@let
+            // If the code generation fails for some reason, we generate code for the other files anyway
+            try {
+                cp.compiler.removeGeneratedCode(listOfNotNull(it.lastSavedFile))
+                it.module?.let { module ->
+                    it.compiledContext?.let { context ->
+                        cp.compiler.generateCode(module, context, listOfNotNull(it.compiledFile))
+                        it.lastSavedFile = it.compiledFile
                     }
-                } catch (ex: Exception) {
-                    LOG.printStackTrace(ex)
                 }
+            } catch (ex: Exception) {
+                log.error(ex, "Failed to save log {it}")
             }
         }
     }
@@ -336,7 +332,7 @@ class SourcePath(
     fun refresh() {
         val initialized = files.values.any { it.parsed != null }
         if (initialized) {
-            LOG.info("Refreshing source path")
+            log.info("Refreshing source path")
             files.values.forEach { it.clean() }
             files.values.forEach { it.compile() }
         }

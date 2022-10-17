@@ -2,7 +2,7 @@ package org.javacs.kt.references
 
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Range
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 import org.javacs.kt.SourcePath
 import org.javacs.kt.position.location
 import org.javacs.kt.position.toURIString
@@ -25,6 +25,8 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameSafe
 import org.jetbrains.kotlin.types.expressions.OperatorConventions
 import org.jetbrains.kotlin.util.OperatorNameConventions
 import java.nio.file.Path
+
+private val log by findLogger.atToplevel(object{})
 
 fun findReferences(file: Path, cursor: Int, sp: SourcePath): List<Location> {
     return doFindReferences(file, cursor, sp)
@@ -52,7 +54,7 @@ private fun doFindReferences(element: KtNamedDeclaration, sp: SourcePath): Colle
     val recover = sp.currentVersion(element.containingFile.toPath().toUri())
     val declaration = recover.compile[BindingContext.DECLARATION_TO_DESCRIPTOR, element] ?: return emptyResult("Declaration ${element.fqName} has no descriptor")
     val maybes = possibleReferences(declaration, sp).map { it.toPath() }
-    LOG.debug("Scanning {} files for references to {}", maybes.size, element.fqName)
+    log.debug("Scanning ${maybes.size} files for references to ${element.fqName}")
     val recompile = sp.compileFiles(maybes.map(Path::toUri))
 
     return when {

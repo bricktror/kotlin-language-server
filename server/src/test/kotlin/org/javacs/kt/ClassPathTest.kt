@@ -12,11 +12,6 @@ import org.javacs.kt.classpath.*
 
 @Disabled
 class ClassPathTest {
-    companion object {
-        @JvmStatic @BeforeAll fun setupLogger() {
-            LOG.connectStdioBackend()
-        }
-    }
 
     @Test fun `find gradle classpath`() {
         val workspaceRoot = testResourcesRoot().resolve("additionalWorkspace")

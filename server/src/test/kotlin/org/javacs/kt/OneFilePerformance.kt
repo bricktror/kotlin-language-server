@@ -6,7 +6,7 @@ import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
-import org.javacs.kt.util.LoggingMessageCollector
+import org.javacs.kt.logging.*
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
 import org.jetbrains.kotlin.cli.jvm.compiler.CliBindingTrace
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
@@ -39,9 +39,12 @@ class OneFilePerformance {
     @State(Scope.Thread)
     class ReusableParts : Closeable {
         internal var config = CompilerConfiguration()
+        private val log by findLogger
         init {
-            config.put(CommonConfigurationKeys.MODULE_NAME, JvmProtoBufUtil.DEFAULT_MODULE_NAME)
-            config.put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, LoggingMessageCollector)
+            config.apply{
+                put(CommonConfigurationKeys.MODULE_NAME, JvmProtoBufUtil.DEFAULT_MODULE_NAME)
+                put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, LoggingMessageCollector(log))
+            }
         }
         internal val disposable = Disposer.newDisposable()
         internal var env = KotlinCoreEnvironment.createForProduction(

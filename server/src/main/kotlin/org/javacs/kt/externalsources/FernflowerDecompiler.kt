@@ -5,10 +5,13 @@ import java.nio.file.Files
 import org.javacs.kt.util.KotlinLSException
 import org.javacs.kt.util.replaceExtensionWith
 import org.javacs.kt.util.withCustomStdout
-import org.javacs.kt.LOG
 import org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler
+import org.javacs.kt.util.DelegatePrintStream
+import org.javacs.kt.logging.*
+
 
 class FernflowerDecompiler : Decompiler {
+    private val log by findLogger
 	private val outputDir by lazy(::createOutputDirectory)
 
 	override fun decompileClass(compiledClass: Path) = decompile(compiledClass, ".java")
@@ -28,8 +31,8 @@ class FernflowerDecompiler : Decompiler {
 	}
 
 	private fun invokeDecompiler(input: Path, output: Path) {
-		LOG.info("Decompiling {} using Fernflower...", input.fileName)
-		withCustomStdout(LOG.outStream) {
+		log.info("Decompiling ${input.fileName} using Fernflower...")
+		withCustomStdout(DelegatePrintStream {log.info(it.trimEnd())}) {
 			ConsoleDecompiler.main(arrayOf(input.toString(), output.toString()))
 		}
 	}

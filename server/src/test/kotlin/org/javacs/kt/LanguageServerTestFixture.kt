@@ -12,6 +12,8 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 
+import org.javacs.kt.logging.*
+
 abstract class LanguageServerTestFixture(relativeWorkspaceRoot: String) : LanguageClient {
     val workspaceRoot = absoluteWorkspaceRoot(relativeWorkspaceRoot)
     val languageServer = createLanguageServer()
@@ -23,7 +25,9 @@ abstract class LanguageServerTestFixture(relativeWorkspaceRoot: String) : Langua
     }
 
     private fun createLanguageServer(): KotlinLanguageServer {
-        val languageServer = KotlinLanguageServer()
+        val languageServer = KotlinLanguageServer(
+            DelegateLoggerTarget(FunctionLoggerTarget{println(it)})
+        )
         val init = InitializeParams().apply {
             capabilities = ClientCapabilities().apply {
                 textDocument = TextDocumentClientCapabilities().apply {

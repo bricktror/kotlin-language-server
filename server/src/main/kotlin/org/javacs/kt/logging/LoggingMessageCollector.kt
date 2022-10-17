@@ -1,16 +1,17 @@
-package org.javacs.kt.util
+package org.javacs.kt.logging
 
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSourceLocation
-import org.javacs.kt.LOG
+import java.util.logging.Logger
 
-object LoggingMessageCollector: MessageCollector {
-	override fun clear() {}
-
+class LoggingMessageCollector(
+    val logger: Logger
+): MessageCollector {
 	override fun report(severity: CompilerMessageSeverity, message: String, location: CompilerMessageSourceLocation?) {
-		LOG.debug("Kotlin compiler: [{}] {} @ {}", severity, message, location)
+		logger.debug{"Kotlin compiler: [${severity}] ${message} @ ${location}"}
 	}
 
+	override fun clear() {}
 	override fun hasErrors() = false
 }

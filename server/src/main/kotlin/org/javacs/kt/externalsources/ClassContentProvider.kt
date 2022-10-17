@@ -2,7 +2,6 @@ package org.javacs.kt.externalsources
 
 import org.javacs.kt.CompilerClassPath
 import org.javacs.kt.ExternalSourcesConfiguration
-import org.javacs.kt.LOG
 import org.javacs.kt.util.describeURI
 import org.javacs.kt.util.KotlinLSException
 import org.javacs.kt.util.TemporaryDirectory
@@ -11,6 +10,8 @@ import java.io.BufferedReader
 import java.io.FileNotFoundException
 import java.nio.file.Files
 import java.util.LinkedHashMap
+import org.javacs.kt.logging.*
+
 
 /**
  * Provides the source code for classes located inside
@@ -23,6 +24,8 @@ class ClassContentProvider(
     private val sourceArchiveProvider: SourceArchiveProvider,
     private val decompiler: Decompiler = FernflowerDecompiler()
 ) {
+    private val log by findLogger
+
     /** Maps recently used (source-)KLS-URIs to their source contents (e.g. decompiled code) and the file extension. */
     private val cachedContents = object : LinkedHashMap<String, Pair<String, String>>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, String>>) = size > 5
@@ -38,7 +41,7 @@ class ClassContentProvider(
         val resolvedUri = sourceArchiveProvider.fetchSourceArchive(uri.archivePath)?.let(uri.withSource(true)::withArchivePath) ?: uri
         val key = resolvedUri.toString()
         val (contents, extension) = cachedContents[key] ?: run {
-                LOG.info("Finding contents of {}", describeURI(resolvedUri.fileUri))
+                log.info("Finding contents of ${describeURI(resolvedUri.fileUri)}")
                 tryReadContentOf(resolvedUri)
                     ?: tryReadContentOf(resolvedUri.withFileExtension("class"))
                     ?: tryReadContentOf(resolvedUri.withFileExtension("java"))

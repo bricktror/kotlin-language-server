@@ -19,7 +19,6 @@ import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtNameReferenceExpression
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
-import org.javacs.kt.LOG
 
 fun fetchSignatureHelpAt(file: CompiledFile, cursor: Int): SignatureHelp? {
     val (signatures, activeDeclaration, activeParameter) = getSignatureTriplet(file, cursor) ?: return nullResult("No call around ${file.describePosition(cursor)}")

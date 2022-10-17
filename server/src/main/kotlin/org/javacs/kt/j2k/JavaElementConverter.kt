@@ -1,6 +1,6 @@
 package org.javacs.kt.j2k
 
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 import com.intellij.psi.*
 import com.intellij.psi.javadoc.*
 
@@ -12,6 +12,15 @@ class JavaElementConverter(
     private val indentLevel: Int = 0,
     private val indentSize: Int = 4 // spaces
 ) : JavaElementVisitor() {
+    private val log by findLogger
+
+    companion object {
+        fun transpileToKt(element: PsiElement) =
+            JavaElementConverter()
+                .also(element::accept)
+                .translatedKotlinCode
+    }
+
     /**
      * Contains the translated code. If code has multiple lines,
      * the first line is *not* indented, all subsequent lines are
@@ -65,7 +74,7 @@ class JavaElementConverter(
     }
 
     private fun j2kTODO(type: String) {
-        LOG.warn("J2K can not convert $type yet")
+        log.warning("J2K can not convert $type yet")
         translatedKotlinCode = "/*$type*/"
     }
 
@@ -219,7 +228,7 @@ class JavaElementConverter(
     }
 
     override fun visitForStatement(statement: PsiForStatement) {
-        LOG.info("Body: ${statement.body}")
+        log.info("Body: ${statement.body}")
         val translatedBody = ((statement.body?.containedStatements ?: emptySequence()) + sequenceOf(statement.update))
             .mapNotNull { it.translate(indentDelta = 1) }
             .buildCodeBlock()

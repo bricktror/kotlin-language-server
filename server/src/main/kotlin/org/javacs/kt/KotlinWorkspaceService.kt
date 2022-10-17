@@ -16,6 +16,8 @@ import java.util.concurrent.CompletableFuture
 import com.google.gson.JsonElement
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import org.javacs.kt.logging.*
+
 
 class KotlinWorkspaceService(
     private val sf: SourceFiles,
@@ -24,6 +26,7 @@ class KotlinWorkspaceService(
     private val docService: KotlinTextDocumentService,
     private val config: Configuration
 ) : WorkspaceService, LanguageClientAware {
+    private val log by findLogger
     private val gson = Gson()
     private var languageClient: LanguageClient? = null
 
@@ -33,7 +36,7 @@ class KotlinWorkspaceService(
 
     override fun executeCommand(params: ExecuteCommandParams): CompletableFuture<Any> {
         val args = params.arguments
-        LOG.info("Executing command: {} with {}", params.command, params.arguments)
+        log.info("Executing command: ${params.command} with ${params.arguments}")
 
         when (params.command) {
             JAVA_TO_KOTLIN_COMMAND -> {
@@ -136,7 +139,7 @@ class KotlinWorkspaceService(
             }
         }
 
-        LOG.info("Updated configuration: {}", settings)
+        log.info("Updated configuration: ${settings}")
     }
 
     @Suppress("DEPRECATION")
@@ -148,7 +151,7 @@ class KotlinWorkspaceService(
 
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
         for (change in params.event.added) {
-            LOG.info("Adding workspace {} to source path", change.uri)
+            log.info("Adding workspace ${change.uri} to source path")
 
             val root = Paths.get(parseURI(change.uri))
 
@@ -159,7 +162,7 @@ class KotlinWorkspaceService(
             }
         }
         for (change in params.event.removed) {
-            LOG.info("Dropping workspace {} from source path", change.uri)
+            log.info("Dropping workspace ${change.uri} from source path")
 
             val root = Paths.get(parseURI(change.uri))
 

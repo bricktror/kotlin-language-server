@@ -10,6 +10,7 @@ import org.javacs.kt.position.range
 import org.javacs.kt.util.findParent
 import org.javacs.kt.util.nullResult
 import org.javacs.kt.util.toPath
+import org.javacs.kt.logging.*
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -32,6 +33,7 @@ class CompiledFile(
     val isScript: Boolean = false,
     val kind: CompilationKind = CompilationKind.DEFAULT
 ) {
+    private val log by findLogger
     /**
      * Find the type of the expression at `cursor`
      */
@@ -70,7 +72,7 @@ class CompiledFile(
         val surroundingExpr = expandForReference(cursor, cursorExpr)
         val scope = scopeAtPoint(cursor) ?: return nullResult("Couldn't find scope at ${describePosition(cursor)}")
         val context = bindingContextOf(surroundingExpr, scope)
-        LOG.info("Hovering {}", surroundingExpr)
+        log.info("Hovering ${surroundingExpr}")
         return referenceFromContext(cursor, context)
     }
 
@@ -115,7 +117,7 @@ class CompiledFile(
                 .filterIsInstance<KtDeclaration>()
                 .firstOrNull { it.textRange.contains(oldChanged) } ?: parse
 
-        LOG.debug { "PSI path: ${psi.parentsWithSelf.toList()}" }
+        log.debug { "PSI path: ${psi.parentsWithSelf.toList()}" }
 
         val (surroundingContent, offset) = contentAndOffsetFromElement(psi, oldParent, asReference)
         val padOffset = " ".repeat(offset)
@@ -150,7 +152,7 @@ class CompiledFile(
 
         // Otherwise just use the expression
         val recoveryRange = parent.textRange
-        LOG.info("Re-parsing {}", describeRange(recoveryRange, true))
+        log.info("Re-parsing ${describeRange(recoveryRange, true)}")
 
         surroundingContent = content.substring(recoveryRange.startOffset, content.length - (parse.text.length - recoveryRange.endOffset))
         offset = recoveryRange.startOffset

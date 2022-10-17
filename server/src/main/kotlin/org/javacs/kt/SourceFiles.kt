@@ -10,6 +10,7 @@ import org.javacs.kt.util.filePath
 import org.javacs.kt.util.partitionAroundLast
 import org.javacs.kt.util.describeURIs
 import org.javacs.kt.util.describeURI
+import org.javacs.kt.logging.*
 import java.io.BufferedReader
 import java.io.StringReader
 import java.io.StringWriter
@@ -67,6 +68,7 @@ class SourceFiles(
     private val sp: SourcePath,
     private val contentProvider: URIContentProvider
 ) {
+    private val log by findLogger
     private val workspaceRoots = mutableSetOf<Path>()
     private var exclusions = SourceExclusions(workspaceRoots)
     private val files = NotifySourcePath(sp)
@@ -100,7 +102,7 @@ class SourceFiles(
             var newText = existing.content
 
             if (newVersion <= existing.version) {
-                LOG.warn("Ignored {} version {}", describeURI(uri), newVersion)
+                log.warning{"Ignored ${describeURI(uri)} version ${newVersion}"}
                 return
             }
 
@@ -136,7 +138,7 @@ class SourceFiles(
     } catch (e: FileNotFoundException) {
         null
     } catch (e: IOException) {
-        LOG.warn("Exception while reading source file {}", describeURI(uri))
+        log.warning{"Exception while reading source file ${describeURI(uri)}"}
         null
     }
 
@@ -153,12 +155,12 @@ class SourceFiles(
     fun addWorkspaceRoot(root: Path) {
         val addSources = findSourceFiles(root)
 
-        logAdded(addSources, root)
+        log.info{"Adding ${describeURIs(addSources)} under ${root} to source path"}
 
         for (uri in addSources) {
             readFromDisk(uri, temporary = false)?.let {
                 files[uri] = it
-            } ?: LOG.warn("Could not read source file '{}'", uri.path)
+            } ?: log.warning("Could not read source file '${uri.path}'")
         }
 
         workspaceRoots.add(root)
@@ -168,7 +170,7 @@ class SourceFiles(
     fun removeWorkspaceRoot(root: Path) {
         val rmSources = files.keys.filter { it.filePath?.startsWith(root) ?: false }
 
-        logRemoved(rmSources, root)
+        log.info{"Removing ${describeURIs(rmSources)} under {rootPath} to source path"}
 
         files.removeAll(rmSources)
         workspaceRoots.remove(root)
@@ -229,12 +231,4 @@ private fun findSourceFiles(root: Path): Set<URI> {
         .filter { sourceMatcher.matches(it.fileName) }
         .map(Path::toUri)
         .toSet()
-}
-
-private fun logAdded(sources: Collection<URI>, rootPath: Path?) {
-    LOG.info("Adding {} under {} to source path", describeURIs(sources), rootPath)
-}
-
-private fun logRemoved(sources: Collection<URI>, rootPath: Path?) {
-    LOG.info("Removing {} under {} to source path", describeURIs(sources), rootPath)
 }

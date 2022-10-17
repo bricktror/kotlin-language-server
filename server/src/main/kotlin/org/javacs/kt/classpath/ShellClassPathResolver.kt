@@ -5,17 +5,18 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import org.javacs.kt.util.userHome
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 
 /** Executes a shell script to determine the classpath */
 internal class ShellClassPathResolver(
     private val script: Path,
     private val workingDir: Path? = null
 ) : ClassPathResolver {
+    private val log by findLogger
     override val classpath: Set<ClassPathEntry> get() {
         val workingDirectory = workingDir?.toFile() ?: script.toAbsolutePath().parent.toFile()
         val cmd = script.toString()
-        LOG.info("Run {} in {}", cmd, workingDirectory)
+        log.info("Run ${cmd} in ${workingDirectory}")
         val process = ProcessBuilder(cmd).directory(workingDirectory).start()
 
         return process.inputStream.bufferedReader().readText()

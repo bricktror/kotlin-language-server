@@ -1,6 +1,5 @@
 package org.javacs.kt.util
 
-import org.javacs.kt.LOG
 import java.time.Duration
 import java.util.function.Supplier
 import java.util.concurrent.atomic.AtomicReference
@@ -9,6 +8,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Future
+import org.javacs.kt.logging.*
+
+private val log by findLogger.atToplevel(object{})
 
 private var threadCount = 0
 
@@ -44,8 +46,8 @@ class Debouncer(
     fun shutdown(awaitTermination: Boolean) {
         executor.shutdown()
         if (awaitTermination) {
-			LOG.info("Awaiting debouncer termination...")
-			executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS)
-		}
+            log.info("Awaiting debouncer termination...")
+            executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS)
+        }
     }
 }

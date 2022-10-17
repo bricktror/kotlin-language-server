@@ -1,10 +1,14 @@
 package org.javacs.kt.util
 
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
+
 import java.io.PrintStream
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
+import java.io.InputStream
+
+val LOG by findLogger.atToplevel(object{})
 
 fun execAndReadStdout(shellCommand: List<String>, directory: Path): String {
     val process = ProcessBuilder(shellCommand).directory(directory.toFile()).start()
@@ -12,20 +16,14 @@ fun execAndReadStdout(shellCommand: List<String>, directory: Path): String {
     return stdout.bufferedReader().use { it.readText() }
 }
 
-fun execAndReadStdoutAndStderr(shellCommand: List<String>, directory: Path): Pair<String, String> {
-    val process = ProcessBuilder(shellCommand).directory(directory.toFile()).start()
-    val stdout = process.inputStream
-    val stderr = process.errorStream
-    var output = ""
-    var errors = ""
-    val outputThread = Thread { stdout.bufferedReader().use { output += it.readText() } }
-    val errorsThread = Thread { stderr.bufferedReader().use { errors += it.readText() } }
-    outputThread.start()
-    errorsThread.start()
-    outputThread.join()
-    errorsThread.join()
-    return Pair(output, errors)
-}
+fun execAndReadStdoutAndStderr(shellCommand: List<String>, directory: Path): Pair<String, String>
+    = ProcessBuilder(shellCommand)
+    .directory(directory.toFile())
+    .start()
+    .let {
+        fun read(stream: InputStream) = stream.bufferedReader().use{it.readText()}
+        read(it.inputStream) to read(it.errorStream)
+    }
 
 inline fun withCustomStdout(delegateOut: PrintStream, task: () -> Unit) {
     val actualOut = System.out
@@ -90,13 +88,13 @@ inline fun <T> tryResolving(what: String, resolver: () -> T?): T? {
     try {
         val resolved = resolver()
         if (resolved != null) {
-            LOG.info("Successfully resolved {}", what)
+            LOG.info{"Successfully resolved ${what}"}
             return resolved
         } else {
-            LOG.info("Could not resolve {} as it is null", what)
+            LOG.info{"Could not resolve ${what} as it is null"}
         }
     } catch (e: Exception) {
-        LOG.info("Could not resolve {}: {}", what, e.message)
+        LOG.info{"Could not resolve ${what}: ${e.message}"}
     }
     return null
 }

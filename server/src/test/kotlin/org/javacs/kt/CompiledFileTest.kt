@@ -9,9 +9,9 @@ import org.junit.jupiter.api.Test
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.*
+import kotlinx.coroutines.future.asCompletableFuture
 
 import org.javacs.kt.compiler.Compiler
-import org.javacs.kt.util.AsyncExecutor
 import org.javacs.kt.util.TempFile
 
 class CompiledFileTest {
@@ -20,7 +20,6 @@ class CompiledFileTest {
         lateinit var outputDirectory: File
 
         @JvmStatic @BeforeAll fun setup() {
-            LOG.connectStdioBackend()
             outputDirectory = Files.createTempDirectory("klsBuildOutput").toFile()
         }
 

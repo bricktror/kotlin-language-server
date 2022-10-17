@@ -1,9 +1,11 @@
 package org.javacs.kt.classpath
 
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 import java.nio.file.Path
 import java.nio.file.PathMatcher
 import java.nio.file.FileSystems
+
+private val log by findLogger.atToplevel(object{})
 
 fun defaultClassPathResolver(workspaceRoots: Collection<Path>): ClassPathResolver
     = withUniqueStdlibs(
@@ -30,11 +32,11 @@ private fun ignoredPathPatterns(root: Path, gitignore: Path): List<PathMatcher> 
         ?.filter { it.isNotEmpty() && !it.startsWith("#") }
         ?.map { it.removeSuffix("/") }
         ?.let { it + listOf(".git") }
-        ?.also { LOG.debug("Adding ignore pattern(s) from {}: {}", gitignore, it) }
+        ?.also { log.debug("Adding ignore pattern(s) from ${gitignore}: ${it}") }
         ?.mapNotNull { try {
             FileSystems.getDefault().getPathMatcher("glob:$root**/$it")
         } catch (e: Exception) {
-            LOG.warn("Did not recognize gitignore pattern: '{}' ({})", it, e.message)
+            log.warning("Did not recognize gitignore pattern: '${it}' (${e.message})")
             null
         } }
         ?: emptyList()

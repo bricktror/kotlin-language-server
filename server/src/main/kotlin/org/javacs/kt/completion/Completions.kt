@@ -9,7 +9,7 @@ import org.eclipse.lsp4j.TextEdit
 import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.Position
 import org.javacs.kt.CompiledFile
-import org.javacs.kt.LOG
+import org.javacs.kt.logging.*
 import org.javacs.kt.CompletionConfiguration
 import org.javacs.kt.index.Symbol
 import org.javacs.kt.index.SymbolIndex
@@ -49,6 +49,8 @@ import org.jetbrains.kotlin.types.typeUtil.replaceArgumentsWithStarProjections
 import org.jetbrains.kotlin.types.checker.KotlinTypeChecker
 import java.util.concurrent.TimeUnit
 
+private val log by findLogger.atToplevel(object{})
+
 // The maximum number of completion items
 private const val MAX_COMPLETION_ITEMS = 75
 
@@ -58,7 +60,7 @@ private const val MIN_SORT_LENGTH = 3
 /** Finds completions at the specified position. */
 fun completions(file: CompiledFile, cursor: Int, index: SymbolIndex, config: CompletionConfiguration): CompletionList {
     val partial = findPartialIdentifier(file, cursor)
-    LOG.debug("Looking for completions that match '{}'", partial)
+    log.debug("Looking for completions that match '${partial}'")
 
     val (elementItems, element) = elementCompletionItems(file, cursor, config, partial)
     val elementItemList = elementItems.toList()
@@ -255,24 +257,24 @@ private fun elementCompletions(file: CompiledFile, cursor: Int, surroundingEleme
     return when (surroundingElement) {
         // import x.y.?
         is KtImportDirective -> {
-            LOG.info("Completing import '{}'", surroundingElement.text)
+            log.info("Completing import '${surroundingElement.text}'")
             val module = file.module
             val match = Regex("import ((\\w+\\.)*)[\\w*]*").matchEntire(surroundingElement.text) ?: return doesntLookLikeImport(surroundingElement)
             val parentDot = if (match.groupValues[1].isNotBlank()) match.groupValues[1] else "."
             val parent = parentDot.substring(0, parentDot.length - 1)
-            LOG.debug("Looking for members of package '{}'", parent)
+            log.debug("Looking for members of package '${parent}'")
             val parentPackage = module.getPackage(FqName.fromSegments(parent.split('.')))
             parentPackage.memberScope.getContributedDescriptors().asSequence()
         }
         // package x.y.?
         is KtPackageDirective -> {
-            LOG.info("Completing package '{}'", surroundingElement.text)
+            log.info("Completing package '${surroundingElement.text}'")
             val module = file.module
             val match = Regex("package ((\\w+\\.)*)[\\w*]*").matchEntire(surroundingElement.text)
                 ?: return doesntLookLikePackage(surroundingElement)
             val parentDot = if (match.groupValues[1].isNotBlank()) match.groupValues[1] else "."
             val parent = parentDot.substring(0, parentDot.length - 1)
-            LOG.debug("Looking for members of package '{}'", parent)
+            log.debug("Looking for members of package '${parent}'")
             val parentPackage = module.getPackage(FqName.fromSegments(parent.split('.')))
             parentPackage.memberScope.getDescriptorsFiltered(DescriptorKindFilter.PACKAGES).asSequence()
         }
@@ -282,45 +284,45 @@ private fun elementCompletions(file: CompiledFile, cursor: Int, surroundingEleme
             if (surroundingElement is KtUserType && surroundingElement.qualifier != null) {
                 val referenceTarget = file.referenceAtPoint(surroundingElement.qualifier!!.startOffset)?.second
                 if (referenceTarget is ClassDescriptor) {
-                    LOG.info("Completing members of {}", referenceTarget.fqNameSafe)
+                    log.info("Completing members of ${referenceTarget.fqNameSafe}")
                     return referenceTarget.getDescriptors()
                 } else {
-                    LOG.warn("No type reference in '{}'", surroundingElement.text)
+                    log.warning("No type reference in '${surroundingElement.text}'")
                     return emptySequence()
                 }
             } else {
                 // : ?
-                LOG.info("Completing type identifier '{}'", surroundingElement.text)
+                log.info("Completing type identifier '${surroundingElement.text}'")
                 val scope = file.scopeAtPoint(cursor) ?: return emptySequence()
                 scopeChainTypes(scope)
             }
         }
         // .?
         is KtQualifiedExpression -> {
-            LOG.info("Completing member expression '{}'", surroundingElement.text)
+            log.info("Completing member expression '${surroundingElement.text}'")
             completeMembers(file, cursor, surroundingElement.receiverExpression, surroundingElement is KtSafeQualifiedExpression)
         }
         is KtCallableReferenceExpression -> {
             // something::?
             if (surroundingElement.receiverExpression != null) {
-                LOG.info("Completing method reference '{}'", surroundingElement.text)
+                log.info("Completing method reference '${surroundingElement.text}'")
                 completeMembers(file, cursor, surroundingElement.receiverExpression!!)
             }
             // ::?
             else {
-                LOG.info("Completing function reference '{}'", surroundingElement.text)
+                log.info("Completing function reference '${surroundingElement.text}'")
                 val scope = file.scopeAtPoint(surroundingElement.startOffset) ?: return noResult("No scope at ${file.describePosition(cursor)}", emptySequence())
                 identifiers(scope)
             }
         }
         // ?
         is KtNameReferenceExpression -> {
-            LOG.info("Completing identifier '{}'", surroundingElement.text)
+            log.info("Completing identifier '${surroundingElement.text}'")
             val scope = file.scopeAtPoint(surroundingElement.startOffset) ?: return noResult("No scope at ${file.describePosition(cursor)}", emptySequence())
             identifiers(scope)
         }
         else -> {
-            LOG.info("{} {} didn't look like a type, a member, or an identifier", surroundingElement::class.simpleName, surroundingElement.text)
+            log.info("${surroundingElement::class.simpleName} ${surroundingElement.text} didn't look like a type, a member, or an identifier")
             emptySequence()
         }
     }
@@ -334,11 +336,11 @@ private fun completeMembers(file: CompiledFile, cursor: Int, receiverExpr: KtExp
             val receiverType = if (unwrapNullable) try {
                 TypeUtils.makeNotNullable(expressionType)
             } catch (e: Exception) {
-                LOG.printStackTrace(e)
+                log.error(e, "Exception compiling member")
                 expressionType
             } else expressionType
 
-            LOG.debug("Completing members of instance '{}'", receiverType)
+            log.debug("Completing members of instance '${receiverType}'")
             val members = receiverType.memberScope.getContributedDescriptors().asSequence()
             val extensions = extensionFunctions(lexicalScope).filter { isExtensionFor(receiverType, it) }
             descriptors = members + extensions
@@ -352,11 +354,11 @@ private fun completeMembers(file: CompiledFile, cursor: Int, receiverExpr: KtExp
     // JavaClass.?
     val referenceTarget = file.referenceAtPoint(receiverExpr.endOffset - 1)?.second
     if (referenceTarget is ClassDescriptor) {
-        LOG.debug("Completing members of '{}'", referenceTarget.fqNameSafe)
+        log.debug("Completing members of '${referenceTarget.fqNameSafe}'")
         return descriptors + referenceTarget.getDescriptors()
     }
 
-    LOG.debug("Can't find member scope for {}", receiverExpr.text)
+    log.debug("Can't find member scope for ${receiverExpr.text}")
     return emptySequence()
 }
 
@@ -554,7 +556,7 @@ private fun logHidden(target: DeclarationDescriptor, from: DeclarationDescriptor
 }
 
 private fun doLogHidden(target: DeclarationDescriptor, from: DeclarationDescriptor) {
-    LOG.debug("Hiding {} because it's not visible from {}", describeDeclaration(target), describeDeclaration(from))
+    log.debug{"Hiding ${describeDeclaration(target)} because it's not visible from ${describeDeclaration(from)}"}
 }
 
 private fun describeDeclaration(declaration: DeclarationDescriptor): String {
@@ -565,19 +567,18 @@ private fun describeDeclaration(declaration: DeclarationDescriptor): String {
 }
 
 private fun doesntLookLikeImport(importDirective: KtImportDirective): Sequence<DeclarationDescriptor> {
-    LOG.debug("{} doesn't look like import a.b...", importDirective.text)
+    log.debug("${importDirective.text} doesn't look like import a.b...")
 
     return emptySequence()
 }
 
 private fun doesntLookLikePackage(packageDirective: KtPackageDirective): Sequence<DeclarationDescriptor> {
-    LOG.debug("{} doesn't look like package a.b...", packageDirective.text)
+    log.debug("${packageDirective.text} doesn't look like package a.b...")
 
     return emptySequence()
 }
 
 private fun empty(message: String): CompletionList {
-    LOG.debug(message)
-
+    log.debug(message)
     return CompletionList(true, emptyList())
 }

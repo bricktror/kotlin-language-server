@@ -12,17 +12,20 @@ import org.javacs.kt.externalsources.*
 import org.javacs.kt.util.TemporaryDirectory
 import org.javacs.kt.util.TempFile
 import org.javacs.kt.util.parseURI
-import org.javacs.kt.progress.Progress
-import org.javacs.kt.progress.LanguageClientProgress
+import org.javacs.kt.progress.*
 import org.javacs.kt.semantictokens.semanticTokensLegend
+import org.javacs.kt.logging.*
 import java.io.Closeable
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletableFuture.completedFuture
+import java.util.logging.Level
 import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
 
-class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
+class KotlinLanguageServer(
+    private val loggerTarget: DelegateLoggerTarget
+) : LanguageServer, LanguageClientAware, Progress.Factory, Closeable {
     val config = Configuration()
     private val compilerTmpDir = TempFile.createDirectory()
     private val scope = CoroutineScope(
@@ -33,7 +36,12 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
 
     private val tempDirectory = TemporaryDirectory()
     private val uriContentProvider = URIContentProvider(ClassContentProvider(config.externalSources, classPath, tempDirectory, CompositeSourceArchiveProvider(JdkSourceArchiveProvider(classPath), ClassPathSourceArchiveProvider(classPath))))
-    val sourcePath = SourcePath(classPath, uriContentProvider, config.indexing, scope)
+    val sourcePath = SourcePath(
+            classPath,
+            uriContentProvider,
+            config.indexing,
+            scope,
+            this)
     val sourceFiles = SourceFiles(sourcePath, uriContentProvider)
 
     private val textDocuments = KotlinTextDocumentService(
@@ -47,20 +55,18 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     private val workspaces = KotlinWorkspaceService(sourceFiles, sourcePath, classPath, textDocuments, config)
     private val protocolExtensions = KotlinProtocolExtensionService(uriContentProvider, classPath, sourcePath, scope)
 
-    private lateinit var client: LanguageClient
+    private var client: LanguageClient? = null
 
     private var progressFactory: Progress.Factory = Progress.Factory.None
-        set(factory: Progress.Factory) {
-            field = factory
-            sourcePath.progressFactory = factory
-        }
+    override fun create(label: String) = progressFactory.create(label)
 
     companion object {
-        val VERSION: String? = System.getProperty("kotlinLanguageServer.version")
-    }
+        private val log by findLogger
 
-    init {
-        LOG.info("Kotlin Language Server: Version ${VERSION ?: "?"}")
+        val VERSION: String? = System.getProperty("kotlinLanguageServer.version")
+        init {
+            log.info("Kotlin Language Server: Version ${VERSION ?: "?"}")
+        }
     }
 
     override fun connect(client: LanguageClient) {
@@ -70,9 +76,17 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
         workspaces.connect(client)
         textDocuments.connect(client)
 
-        LOG.info("Connected to client")
+        log.info("Connected to client")
     }
 
+    private fun connectLoggingBackend() {
+        this.loggerTarget.inner = FunctionLoggerTarget {
+            client?.logMessage(MessageParams().apply {
+                type = it.level.toLSPMessageType()
+                message = it.message
+            })
+        }
+    }
     override fun getTextDocumentService(): KotlinTextDocumentService = textDocuments
 
     override fun getWorkspaceService(): KotlinWorkspaceService = workspaces
@@ -81,6 +95,41 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     fun getProtocolExtensionService(): KotlinProtocolExtensions = protocolExtensions
 
     override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> = scope.async {
+        val clientCapabilities = params.capabilities
+        config.completion.snippets.enabled = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false
+
+        if (clientCapabilities?.window?.workDoneProgress ?: false && client!=null) {
+            progressFactory = LanguageClientProgress.Factory(client!!)
+        }
+
+        @Suppress("DEPRECATION")
+        val folders = params.workspaceFolders?.takeIf { it.isNotEmpty() }
+            ?: params.rootUri?.let(::WorkspaceFolder)?.let(::listOf)
+            ?: params.rootPath?.let(Paths::get)?.toUri()?.toString()?.let(::WorkspaceFolder)?.let(::listOf)
+            ?: listOf()
+
+        (params.workDoneToken
+            ?.takeIf { client!=null }
+            ?.let { LanguageClientProgress("Workspace folders", it, client!!) }
+            ?: Progress.None).use {
+                it.reportSequentially(folders, {it.name}) { folder ->
+                    log.info("Adding workspace folder ${folder.name}")
+
+                    report("Updating source path")
+                    val root = Paths.get(parseURI(folder.uri))
+                    sourceFiles.addWorkspaceRoot(root)
+
+                    report("Updating class path")
+                    val refreshed = classPath.addWorkspaceRoot(root)
+                    if (refreshed) {
+                        report("Refreshing source path")
+                        sourcePath.refresh()
+                    }
+                }
+            }
+
+        textDocuments.lintAll()
+
         val serverCapabilities = ServerCapabilities().apply {
             setTextDocumentSync(TextDocumentSyncKind.Incremental)
             workspace = WorkspaceServerCapabilities().apply {
@@ -90,7 +139,11 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
                 }
             }
             hoverProvider = Either.forLeft(true)
-            renameProvider = Either.forLeft(true)
+            renameProvider =
+                if (clientCapabilities?.textDocument?.rename?.prepareSupport ?: false)
+                    Either.forRight(RenameOptions(false))
+                else
+                    Either.forLeft(true)
             completionProvider = CompletionOptions(false, listOf("."))
             signatureHelpProvider = SignatureHelpOptions(listOf("(", ","))
             definitionProvider = Either.forLeft(true)
@@ -104,66 +157,16 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
             executeCommandProvider = ExecuteCommandOptions(ALL_COMMANDS)
             documentHighlightProvider = Either.forLeft(true)
         }
-
-        val clientCapabilities = params.capabilities
-        config.completion.snippets.enabled = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false
-
-        if (clientCapabilities?.window?.workDoneProgress ?: false) {
-            progressFactory = LanguageClientProgress.Factory(client)
-        }
-
-        if (clientCapabilities?.textDocument?.rename?.prepareSupport ?: false) {
-            serverCapabilities.renameProvider = Either.forRight(RenameOptions(false))
-        }
-
-        @Suppress("DEPRECATION")
-        val folders = params.workspaceFolders?.takeIf { it.isNotEmpty() }
-            ?: params.rootUri?.let(::WorkspaceFolder)?.let(::listOf)
-            ?: params.rootPath?.let(Paths::get)?.toUri()?.toString()?.let(::WorkspaceFolder)?.let(::listOf)
-            ?: listOf()
-
-        val progress = params.workDoneToken?.let { LanguageClientProgress("Workspace folders", it, client) }
-
-        folders.forEachIndexed { i, folder ->
-            LOG.info("Adding workspace folder {}", folder.name)
-            val progressPrefix = "[${i + 1}/${folders.size}] ${folder.name ?: ""}"
-            val progressPercent = (100 * i) / folders.size
-
-            progress?.update("$progressPrefix: Updating source path", progressPercent)
-            val root = Paths.get(parseURI(folder.uri))
-            sourceFiles.addWorkspaceRoot(root)
-
-            progress?.update("$progressPrefix: Updating class path", progressPercent)
-            val refreshed = classPath.addWorkspaceRoot(root)
-            if (refreshed) {
-                progress?.update("$progressPrefix: Refreshing source path", progressPercent)
-                sourcePath.refresh()
-            }
-        }
-        progress?.close()
-
-        textDocuments.lintAll()
-
-        val serverInfo = ServerInfo("Kotlin Language Server", VERSION)
-
-        InitializeResult(serverCapabilities, serverInfo)
+        InitializeResult(
+            serverCapabilities,
+            ServerInfo("Kotlin Language Server", VERSION))
     }.asCompletableFuture()
 
-    private fun connectLoggingBackend() {
-        val backend: (LogMessage) -> Unit = {
-            client.logMessage(MessageParams().apply {
-                type = it.level.toLSPMessageType()
-                message = it.message
-            })
-        }
-        LOG.connectOutputBackend(backend)
-        LOG.connectErrorBackend(backend)
-    }
 
-    private fun LogLevel.toLSPMessageType(): MessageType = when (this) {
-        LogLevel.ERROR -> MessageType.Error
-        LogLevel.WARN -> MessageType.Warning
-        LogLevel.INFO -> MessageType.Info
+    private fun Level.toLSPMessageType(): MessageType = when (this) {
+        Level.SEVERE -> MessageType.Error
+        Level.WARNING -> MessageType.Warning
+        Level.INFO -> MessageType.Info
         else -> MessageType.Log
     }
 
