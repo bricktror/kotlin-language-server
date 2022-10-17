@@ -5,8 +5,9 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.jsonrpc.services.JsonDelegate
 import org.eclipse.lsp4j.services.LanguageClient
 import org.eclipse.lsp4j.services.LanguageClientAware
-import org.eclipse.lsp4j.services.LanguageServer
 import org.eclipse.lsp4j.services.NotebookDocumentService
+import org.eclipse.lsp4j.services.TextDocumentService as JavaTextDocumentService
+import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
 import org.javacs.kt.command.ALL_COMMANDS
 import org.javacs.kt.externalsources.*
 import org.javacs.kt.util.TemporaryDirectory
@@ -15,6 +16,7 @@ import org.javacs.kt.util.parseURI
 import org.javacs.kt.progress.*
 import org.javacs.kt.semantictokens.semanticTokensLegend
 import org.javacs.kt.logging.*
+import org.javacs.kt.lsp4kt.*
 import java.io.Closeable
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
@@ -24,36 +26,48 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
 
 class KotlinLanguageServer(
-    private val loggerTarget: DelegateLoggerTarget
+    scope: CoroutineScope,
 ) : LanguageServer, LanguageClientAware, Progress.Factory, Closeable {
-    val config = Configuration()
+    private val config = Configuration()
     private val compilerTmpDir = TempFile.createDirectory()
-    private val scope = CoroutineScope(
-        Dispatchers.Default
-        + CoroutineName("kotlin-lsp-worker")
-        + Job())
-    val classPath = CompilerClassPath(config.compiler, compilerTmpDir.file, scope)
+    private val classPath = CompilerClassPath(config.compiler, compilerTmpDir.file, scope)
 
     private val tempDirectory = TemporaryDirectory()
-    private val uriContentProvider = URIContentProvider(ClassContentProvider(config.externalSources, classPath, tempDirectory, CompositeSourceArchiveProvider(JdkSourceArchiveProvider(classPath), ClassPathSourceArchiveProvider(classPath))))
-    val sourcePath = SourcePath(
+    private val uriContentProvider = URIContentProvider(
+        ClassContentProvider(
+            config.externalSources,
+            classPath,
+            tempDirectory,
+            CompositeSourceArchiveProvider(
+                JdkSourceArchiveProvider(classPath),
+                ClassPathSourceArchiveProvider(classPath))))
+    private val sourcePath = SourcePath(
             classPath,
             uriContentProvider,
             config.indexing,
             scope,
             this)
-    val sourceFiles = SourceFiles(sourcePath, uriContentProvider)
+    private val sourceFiles = SourceFiles(sourcePath, uriContentProvider)
 
-    private val textDocuments = KotlinTextDocumentService(
+    override val textDocumentService = KotlinTextDocumentService(
         sourceFiles,
         sourcePath,
         config,
         tempDirectory,
         uriContentProvider,
+        classPath)
+    override val workspaceService = KotlinWorkspaceService(
+        sourceFiles,
+        sourcePath,
         classPath,
+        textDocumentService,
+        config)
+
+    private val protocolExtensions = KotlinProtocolExtensionService(
+        uriContentProvider,
+        classPath,
+        sourcePath,
         scope)
-    private val workspaces = KotlinWorkspaceService(sourceFiles, sourcePath, classPath, textDocuments, config)
-    private val protocolExtensions = KotlinProtocolExtensionService(uriContentProvider, classPath, sourcePath, scope)
 
     private var client: LanguageClient? = null
 
@@ -71,30 +85,16 @@ class KotlinLanguageServer(
 
     override fun connect(client: LanguageClient) {
         this.client = client
-        connectLoggingBackend()
-
-        workspaces.connect(client)
-        textDocuments.connect(client)
-
+        workspaceService.connect(client)
+        textDocumentService.connect(client)
         log.info("Connected to client")
     }
 
-    private fun connectLoggingBackend() {
-        this.loggerTarget.inner = FunctionLoggerTarget {
-            client?.logMessage(MessageParams().apply {
-                type = it.level.toLSPMessageType()
-                message = it.message
-            })
-        }
-    }
-    override fun getTextDocumentService(): KotlinTextDocumentService = textDocuments
-
-    override fun getWorkspaceService(): KotlinWorkspaceService = workspaces
 
     @JsonDelegate
     fun getProtocolExtensionService(): KotlinProtocolExtensions = protocolExtensions
 
-    override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> = scope.async {
+    override suspend fun initialize(params: InitializeParams): InitializeResult {
         val clientCapabilities = params.capabilities
         config.completion.snippets.enabled = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false
 
@@ -128,46 +128,38 @@ class KotlinLanguageServer(
                 }
             }
 
-        textDocuments.lintAll()
+        textDocumentService.lintAll()
 
-        val serverCapabilities = ServerCapabilities().apply {
-            setTextDocumentSync(TextDocumentSyncKind.Incremental)
-            workspace = WorkspaceServerCapabilities().apply {
-                workspaceFolders = WorkspaceFoldersOptions().apply {
-                    supported = true
-                    changeNotifications = Either.forRight(true)
+        return InitializeResult().apply{
+            serverInfo = ServerInfo("Kotlin Language Server", VERSION)
+            capabilities = ServerCapabilities().apply {
+                setTextDocumentSync(TextDocumentSyncKind.Incremental)
+                workspace = WorkspaceServerCapabilities().apply {
+                    workspaceFolders = WorkspaceFoldersOptions().apply {
+                        supported = true
+                        changeNotifications = Either.forRight(true)
+                    }
                 }
+                hoverProvider = Either.forLeft(true)
+                renameProvider =
+                    if (clientCapabilities?.textDocument?.rename?.prepareSupport ?: false)
+                        Either.forRight(RenameOptions(false))
+                    else
+                        Either.forLeft(true)
+                definitionProvider = Either.forLeft(true)
+                documentSymbolProvider = Either.forLeft(true)
+                workspaceSymbolProvider = Either.forLeft(true)
+                referencesProvider = Either.forLeft(true)
+                codeActionProvider = Either.forLeft(true)
+                documentFormattingProvider = Either.forLeft(true)
+                documentRangeFormattingProvider = Either.forLeft(true)
+                documentHighlightProvider = Either.forLeft(true)
+                completionProvider = CompletionOptions(false, listOf("."))
+                signatureHelpProvider = SignatureHelpOptions(listOf("(", ","))
+                semanticTokensProvider = SemanticTokensWithRegistrationOptions(semanticTokensLegend, true, true)
+                executeCommandProvider = ExecuteCommandOptions(ALL_COMMANDS)
             }
-            hoverProvider = Either.forLeft(true)
-            renameProvider =
-                if (clientCapabilities?.textDocument?.rename?.prepareSupport ?: false)
-                    Either.forRight(RenameOptions(false))
-                else
-                    Either.forLeft(true)
-            completionProvider = CompletionOptions(false, listOf("."))
-            signatureHelpProvider = SignatureHelpOptions(listOf("(", ","))
-            definitionProvider = Either.forLeft(true)
-            documentSymbolProvider = Either.forLeft(true)
-            workspaceSymbolProvider = Either.forLeft(true)
-            referencesProvider = Either.forLeft(true)
-            semanticTokensProvider = SemanticTokensWithRegistrationOptions(semanticTokensLegend, true, true)
-            codeActionProvider = Either.forLeft(true)
-            documentFormattingProvider = Either.forLeft(true)
-            documentRangeFormattingProvider = Either.forLeft(true)
-            executeCommandProvider = ExecuteCommandOptions(ALL_COMMANDS)
-            documentHighlightProvider = Either.forLeft(true)
         }
-        InitializeResult(
-            serverCapabilities,
-            ServerInfo("Kotlin Language Server", VERSION))
-    }.asCompletableFuture()
-
-
-    private fun Level.toLSPMessageType(): MessageType = when (this) {
-        Level.SEVERE -> MessageType.Error
-        Level.WARNING -> MessageType.Warning
-        Level.INFO -> MessageType.Info
-        else -> MessageType.Log
     }
 
     override fun close() {
@@ -177,9 +169,9 @@ class KotlinLanguageServer(
         compilerTmpDir.close()
     }
 
-    override fun shutdown(): CompletableFuture<Any> {
+    override suspend fun shutdown(): Any? {
         close()
-        return completedFuture(null)
+        return null
     }
 
     override fun exit() {}

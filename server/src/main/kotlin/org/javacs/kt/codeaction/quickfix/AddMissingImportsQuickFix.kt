@@ -1,7 +1,7 @@
 package org.javacs.kt.codeaction.quickfix
 
+import arrow.core.Either
 import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.jetbrains.kotlin.psi.KtFile
 import org.javacs.kt.CompiledFile
 import org.javacs.kt.index.SymbolIndex
@@ -29,7 +29,7 @@ class AddMissingImportsQuickFix: QuickFix {
                 codeAction.diagnostics = listOf(diagnostic)
                 codeAction.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
 
-                Either.forRight(codeAction)
+                Either.Right(codeAction)
             }
         }
     }

@@ -1,7 +1,7 @@
 package org.javacs.kt.codeaction.quickfix
 
+import arrow.core.Either
 import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.javacs.kt.CompiledFile
 import org.javacs.kt.index.SymbolIndex
 import org.javacs.kt.position.offset
@@ -47,7 +47,7 @@ class ImplementAbstractMembersQuickFix : QuickFix {
         val startCursor = offset(file.content, range.start)
         val endCursor = offset(file.content, range.end)
         val kotlinDiagnostics = file.compile.diagnostics
-        
+
         // If the client side and the server side diagnostics contain a valid diagnostic for this range.
         if (diagnostic != null && anyDiagnosticMatch(kotlinDiagnostics, startCursor, endCursor)) {
             // Get the class with the missing members
@@ -76,7 +76,7 @@ class ImplementAbstractMembersQuickFix : QuickFix {
                 codeAction.kind = CodeActionKind.QuickFix
                 codeAction.title = "Implement abstract members"
                 codeAction.diagnostics = listOf(diagnostic)
-                return listOf(Either.forRight(codeAction))
+                return listOf(Either.Right(codeAction))
             }
         }
         return listOf()
@@ -97,7 +97,7 @@ private fun getAbstractMembersStubs(file: CompiledFile, kotlinClass: KtClass) =
         val descriptor = referenceAtPoint?.second
 
         val classDescriptor = getClassDescriptor(descriptor)
-        
+
         // If the super class is abstract or an interface
         if (null != classDescriptor && (classDescriptor.kind.isInterface || classDescriptor.modality == Modality.ABSTRACT)) {
             val superClassTypeArguments = getSuperClassTypeProjections(file, it)

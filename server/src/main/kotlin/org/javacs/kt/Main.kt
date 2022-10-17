@@ -2,12 +2,21 @@ package org.javacs.kt
 
 import com.beust.jcommander.JCommander
 import com.beust.jcommander.Parameter
+
 import java.util.concurrent.Executors
+
 import org.eclipse.lsp4j.launch.LSPLauncher
+import org.eclipse.lsp4j.*
+import java.util.logging.Level
+
+import kotlinx.coroutines.*
+import kotlinx.coroutines.future.asCompletableFuture
+
 import org.javacs.kt.util.ExitingInputStream
 import org.javacs.kt.util.tcpStartServer
 import org.javacs.kt.util.tcpConnectToClient
 import org.javacs.kt.logging.*
+import org.javacs.kt.lsp4kt.*
 
 class Args {
     /*
@@ -41,9 +50,20 @@ fun main(argv: Array<String>) {
         tcpStartServer(it)
     } ?: Pair(System.`in`, System.out)
 
-    val server = KotlinLanguageServer(loggerTarget)
+    val scope = CoroutineScope(
+        Dispatchers.Default
+        + CoroutineName("kotlin-lsp-worker")
+        + Job())
+
+    val server = KotlinLanguageServer(scope)
     val threads = Executors.newSingleThreadExecutor { Thread(it, "client") }
-    val launcher = LSPLauncher.createServerLauncher(server, ExitingInputStream(inStream), outStream, threads) { it }
+    val launcher = LSPLauncher.createServerLauncher(
+        server.asLsp4j(scope),
+        ExitingInputStream(inStream),
+        outStream,
+        threads) { it }
+
+    loggerTarget.inner = Lsp4jLoggerTarget(launcher.remoteProxy!!)
 
     server.connect(launcher.remoteProxy)
     launcher.startListening()

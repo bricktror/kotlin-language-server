@@ -1,9 +1,8 @@
 package org.javacs.kt
 
+import arrow.core.Either
 import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.LanguageClient
-import org.eclipse.lsp4j.services.TextDocumentService
 import org.javacs.kt.codeaction.codeActions
 import org.javacs.kt.completion.*
 import org.javacs.kt.definition.goToDefinition
@@ -26,15 +25,14 @@ import org.javacs.kt.util.describeURI
 import org.javacs.kt.util.describeURIs
 import org.javacs.kt.rename.renameSymbol
 import org.javacs.kt.highlight.documentHighlightsAt
+import org.javacs.kt.lsp4kt.*
 import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics
 import java.net.URI
 import java.io.Closeable
 import java.nio.file.Path
 import java.time.Duration
-import java.util.concurrent.CompletableFuture
 import kotlin.coroutines.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.future.asCompletableFuture
 import org.javacs.kt.logging.*
 
 class KotlinTextDocumentService(
@@ -44,12 +42,15 @@ class KotlinTextDocumentService(
     private val tempDirectory: TemporaryDirectory,
     private val uriContentProvider: URIContentProvider,
     private val cp: CompilerClassPath,
-    private val scope: CoroutineScope,
 ) : TextDocumentService, Closeable {
     private val log by findLogger
     private lateinit var client: LanguageClient
 
     var debounceLint = Debouncer(Duration.ofMillis(config.linting.debounceTime))
+    fun updateDebouncer() {
+        debounceLint = Debouncer(Duration.ofMillis(config.linting.debounceTime))
+    }
+
     val lintTodo = mutableSetOf<URI>()
     var lintCount = 0
 
@@ -94,59 +95,59 @@ class KotlinTextDocumentService(
         return Pair(compiled, offset)
     }
 
-    override fun codeAction(params: CodeActionParams): CompletableFuture<List<Either<Command, CodeAction>>> = scope.async {
+    override suspend fun codeAction(params: CodeActionParams): List<Either<Command, CodeAction>> {
         val (file, _) = recover(params.textDocument.uri, params.range.start, Recompile.NEVER)
-        codeActions(file, sp.index, params.range, params.context)
-    }.asCompletableFuture()
+        return codeActions(file, sp.index, params.range, params.context)
+    }
 
-    override fun hover(position: HoverParams): CompletableFuture<Hover?> = scope.async {
+    override suspend fun hover(position: HoverParams): Hover? {
         reportTime {
             log.info{"Hovering at ${describePosition(position)}"}
 
             val (file, cursor) = recover(position, Recompile.NEVER)
-            hoverAt(file, cursor) ?: noResult("No hover found at ${describePosition(position)}", null)
+            return hoverAt(file, cursor) ?: noResult("No hover found at ${describePosition(position)}", null)
         }
-    }.asCompletableFuture()
+    }
 
-    override fun documentHighlight(position: DocumentHighlightParams): CompletableFuture<List<DocumentHighlight>> = scope.async {
+    override suspend fun documentHighlight(position: DocumentHighlightParams): List<DocumentHighlight> {
         val (file, cursor) = recover(position.textDocument.uri, position.position, Recompile.NEVER)
-        documentHighlightsAt(file, cursor)
-    }.asCompletableFuture()
+        return documentHighlightsAt(file, cursor)
+    }
 
-    override fun onTypeFormatting(params: DocumentOnTypeFormattingParams): CompletableFuture<List<TextEdit>> {
+    override suspend fun onTypeFormatting(params: DocumentOnTypeFormattingParams): List<TextEdit> {
         TODO("not implemented")
     }
 
-    override fun definition(position: DefinitionParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> = scope.async {
+    override suspend fun definition(position: DefinitionParams): Either<List<Location>, List<LocationLink>> {
         reportTime {
             log.info{"Go-to-definition at ${describePosition(position)}"}
 
             val (file, cursor) = recover(position, Recompile.NEVER)
-            goToDefinition(file, cursor, uriContentProvider.classContentProvider, tempDirectory, config.externalSources, cp)
+            return goToDefinition(file, cursor, uriContentProvider.classContentProvider, tempDirectory, config.externalSources, cp)
                 ?.let(::listOf)
-                ?.let { Either.forLeft<List<Location>, List<LocationLink>>(it) }
-                ?: noResult("Couldn't find definition at ${describePosition(position)}", Either.forLeft(emptyList()))
+                ?.let { Either.Left(it) }
+                ?: noResult("Couldn't find definition at ${describePosition(position)}", Either.Left(emptyList()))
         }
-    }.asCompletableFuture()
+    }
 
-    override fun rangeFormatting(params: DocumentRangeFormattingParams): CompletableFuture<List<TextEdit>> = scope.async {
+    override suspend fun rangeFormatting(params: DocumentRangeFormattingParams): List<TextEdit> {
         val code = extractRange(params.textDocument.content, params.range)
-        listOf(TextEdit(
+        return listOf(TextEdit(
             params.range,
             formatKotlinCode(code, params.options)
         ))
-    }.asCompletableFuture()
+    }
 
-    override fun codeLens(params: CodeLensParams): CompletableFuture<List<CodeLens>> {
+    override suspend fun codeLens(params: CodeLensParams): List<CodeLens> {
         TODO("not implemented")
     }
 
-    override fun rename(params: RenameParams) = scope.async {
+    override suspend fun rename(params: RenameParams) :WorkspaceEdit? {
         val (file, cursor) = recover(params, Recompile.NEVER)
-        renameSymbol(file, cursor, sp, params.newName)
-    }.asCompletableFuture()
+        return renameSymbol(file, cursor, sp, params.newName)
+    }
 
-    override fun completion(position: CompletionParams) = scope.async {
+    override suspend fun completion(position: CompletionParams):Either<List<CompletionItem>, CompletionList> {
         reportTime {
             log.info{"Completing at ${describePosition(position)}"}
 
@@ -154,25 +155,25 @@ class KotlinTextDocumentService(
             val completions = completions(file, cursor, sp.index, config.completion)
             log.info("Found ${completions.items.size} items")
 
-            Either.forRight<List<CompletionItem>, CompletionList>(completions)
+            return Either.Right(completions)
         }
-    }.asCompletableFuture()
+    }
 
-    override fun resolveCompletionItem(unresolved: CompletionItem): CompletableFuture<CompletionItem> {
+    override suspend fun resolveCompletionItem(unresolved: CompletionItem): CompletionItem {
         TODO("not implemented")
     }
 
-    @Suppress("DEPRECATION")
-    override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> = scope.async {
-        log.info{"Find symbols in ${describeURI(params.textDocument.uri)}"}
+    /* @Suppress("DEPRECATION") */
+    /* override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> = scope.async { */
+    /*     log.info{"Find symbols in ${describeURI(params.textDocument.uri)}"} */
 
-        reportTime {
-            val uri = parseURI(params.textDocument.uri)
-            val parsed = sp.parsedFile(uri)
+    /*     reportTime { */
+    /*         val uri = parseURI(params.textDocument.uri) */
+    /*         val parsed = sp.parsedFile(uri) */
 
-            documentSymbols(parsed)
-        }
-    }.asCompletableFuture()
+    /*         documentSymbols(parsed) */
+    /*     } */
+    /* }.asCompletableFuture() */
 
     override fun didOpen(params: DidOpenTextDocumentParams) {
         val uri = parseURI(params.textDocument.uri)
@@ -189,14 +190,14 @@ class KotlinTextDocumentService(
         }
     }
 
-    override fun signatureHelp(position: SignatureHelpParams): CompletableFuture<SignatureHelp?> = scope.async {
+    override suspend fun signatureHelp(position: SignatureHelpParams): SignatureHelp? {
         reportTime {
             log.info{"Signature help at ${describePosition(position)}"}
 
             val (file, cursor) = recover(position, Recompile.NEVER)
-            fetchSignatureHelpAt(file, cursor) ?: noResult("No function call around ${describePosition(position)}", null)
+            return fetchSignatureHelpAt(file, cursor) ?: noResult("No function call around ${describePosition(position)}", null)
         }
-    }.asCompletableFuture()
+    }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = parseURI(params.textDocument.uri)
@@ -204,14 +205,14 @@ class KotlinTextDocumentService(
         clearDiagnostics(uri)
     }
 
-    override fun formatting(params: DocumentFormattingParams): CompletableFuture<List<TextEdit>> = scope.async {
+    override suspend fun formatting(params: DocumentFormattingParams): List<TextEdit> {
         val code = params.textDocument.content
         log.info{"Formatting ${describeURI(params.textDocument.uri)}"}
-        listOf(TextEdit(
+        return listOf(TextEdit(
             Range(Position(0, 0), position(code, code.length)),
             formatKotlinCode(code, params.options)
         ))
-    }.asCompletableFuture()
+    }
 
     override fun didChange(params: DidChangeTextDocumentParams) {
         val uri = parseURI(params.textDocument.uri)
@@ -219,16 +220,15 @@ class KotlinTextDocumentService(
         lintLater(uri)
     }
 
-    override fun references(position: ReferenceParams) = scope.async {
-        position.textDocument.filePath
+    override suspend fun references(position: ReferenceParams): List<Location>
+         = position.textDocument.filePath
             ?.let { file ->
                 val content = sp.content(parseURI(position.textDocument.uri))
                 val offset = offset(content, position.position.line, position.position.character)
                 findReferences(file, offset, sp)
-            }
-    }.asCompletableFuture()
+            } ?: listOf<Location>()
 
-    override fun semanticTokensFull(params: SemanticTokensParams) = scope.async {
+    override suspend fun semanticTokensFull(params: SemanticTokensParams): SemanticTokens {
         log.info{"Full semantic tokens in ${describeURI(params.textDocument.uri)}"}
 
         reportTime {
@@ -238,11 +238,11 @@ class KotlinTextDocumentService(
             val tokens = encodedSemanticTokens(file)
             log.info("Found ${tokens.size} tokens")
 
-            SemanticTokens(tokens)
+            return SemanticTokens(tokens)
         }
-    }.asCompletableFuture()
+    }
 
-    override fun semanticTokensRange(params: SemanticTokensRangeParams) = scope.async {
+    override suspend fun semanticTokensRange(params: SemanticTokensRangeParams): SemanticTokens {
         log.info{"Ranged semantic tokens in ${describeURI(params.textDocument.uri)}"}
 
         reportTime {
@@ -252,20 +252,16 @@ class KotlinTextDocumentService(
             val tokens = encodedSemanticTokens(file, params.range)
             log.info("Found ${tokens.size} tokens")
 
-            SemanticTokens(tokens)
+            return SemanticTokens(tokens)
         }
-    }.asCompletableFuture()
+    }
 
-    override fun resolveCodeLens(unresolved: CodeLens): CompletableFuture<CodeLens> {
+    override suspend fun resolveCodeLens(unresolved: CodeLens): CodeLens {
         TODO("not implemented")
     }
 
     private fun describePosition(position: TextDocumentPositionParams): String {
         return "${describeURI(position.textDocument.uri)} ${position.position.line + 1}:${position.position.character + 1}"
-    }
-
-    public fun updateDebouncer() {
-        debounceLint = Debouncer(Duration.ofMillis(config.linting.debounceTime))
     }
 
     fun lintAll() {

@@ -1,7 +1,7 @@
 package org.javacs.kt.codeaction
 
+import arrow.core.Either
 import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.javacs.kt.CompiledFile
 import org.javacs.kt.codeaction.quickfix.ImplementAbstractMembersQuickFix
 import org.javacs.kt.codeaction.quickfix.AddMissingImportsQuickFix
@@ -14,8 +14,13 @@ val QUICK_FIXES = listOf(
     AddMissingImportsQuickFix()
 )
 
-fun codeActions(file: CompiledFile, index: SymbolIndex, range: Range, context: CodeActionContext): List<Either<Command, CodeAction>> {
-    // context.only does not work when client is emacs... 
+fun codeActions(
+    file: CompiledFile,
+    index: SymbolIndex,
+    range: Range,
+    context: CodeActionContext
+): List<Either<Command, CodeAction>> {
+    // context.only does not work when client is emacs...
     val requestedKinds = context.only ?: listOf(CodeActionKind.Refactor, CodeActionKind.QuickFix)
     return requestedKinds.map {
         when (it) {
@@ -30,7 +35,7 @@ fun getRefactors(file: CompiledFile, range: Range): List<Either<Command, CodeAct
     val hasSelection = (range.end.line - range.start.line) != 0 || (range.end.character - range.start.character) != 0
     return if (hasSelection) {
         listOf(
-            Either.forLeft<Command, CodeAction>(
+            Either.Left(
                 Command("Convert Java to Kotlin", JAVA_TO_KOTLIN_COMMAND, listOf(
                     file.parse.toPath().toUri().toString(),
                     range

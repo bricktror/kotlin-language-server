@@ -17,6 +17,7 @@ repositories {
 }
 
 dependencies {
+    implementation("io.arrow-kt:arrow-core:1.1.3")
     implementation("org.slf4j:slf4j-api:${Versions.slf4j}")
     implementation("org.slf4j:slf4j-simple:${Versions.slf4j}")
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j:${Versions.lsp4j}")
