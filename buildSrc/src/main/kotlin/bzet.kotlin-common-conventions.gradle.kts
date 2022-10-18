@@ -37,5 +37,4 @@ dependencies {
 tasks.named<Test>("test") {
     // Use JUnit Platform for unit tests.
     useJUnitPlatform()
-    maxParallelForks=Runtime.getRuntime().availableProcessors() / 2
 }
