@@ -5,7 +5,6 @@ import org.eclipse.lsp4j.Range
 import java.nio.file.Path
 import org.javacs.kt.CompiledFile
 import org.javacs.kt.CompilerClassPath
-import org.javacs.kt.ExternalSourcesConfiguration
 import org.javacs.kt.externalsources.ClassContentProvider
 import org.javacs.kt.externalsources.toKlsURI
 import org.javacs.kt.externalsources.KlsURI
@@ -32,7 +31,7 @@ fun goToDefinition(
     cursor: Int,
     classContentProvider: ClassContentProvider,
     tempDir: TemporaryDirectory,
-    config: ExternalSourcesConfiguration,
+    useKlsScheme: Boolean,
     cp: CompilerClassPath
 ): Location? {
     val (_, target) = file.referenceExpressionAtPoint(cursor) ?: return null
@@ -52,7 +51,7 @@ fun goToDefinition(
             parseURI(rawClassURI).toKlsURI()?.let { klsURI ->
                 val (klsSourceURI, content) = classContentProvider.contentOf(klsURI)
 
-                if (config.useKlsScheme) {
+                if (useKlsScheme) {
                     // Defer decompilation until a jarClassContents request is sent
                     destination.uri = klsSourceURI.toString()
                 } else {

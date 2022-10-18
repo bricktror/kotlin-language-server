@@ -24,7 +24,7 @@ import java.util.concurrent.locks.ReentrantLock
 class SourcePath(
     private val cp: CompilerClassPath,
     private val contentProvider: URIContentProvider,
-    private val indexingConfig: IndexingConfiguration,
+    private val config: Configuration,
     private val scope: CoroutineScope,
     progressFactory: Progress.Factory,
 ) {
@@ -32,7 +32,6 @@ class SourcePath(
     private val files = mutableMapOf<URI, SourceFile>()
     private val parseDataWriteLock = ReentrantLock()
 
-    var indexEnabled: Boolean by indexingConfig::enabled
     val index = SymbolIndex(progressFactory)
 
     var beforeCompileCallback: () -> Unit = {}
@@ -289,7 +288,7 @@ class SourcePath(
      */
     fun refreshDependencyIndexes() {
         compileAllFiles()
-        if(!indexEnabled) return
+        if(!config.indexEnabled) return
         val module = files.values.map{it.module}.first{it!=null} ?: return
 
         scope.launch {
@@ -303,13 +302,11 @@ class SourcePath(
      * Refreshes the indexes. If already done, refreshes only the declarations in the files that were changed.
      */
     private fun refreshWorkspaceIndexes(oldFiles: List<SourceFile>, newFiles: List<SourceFile>) = scope.launch {
-        if (indexEnabled) {
-            val oldDeclarations = getDeclarationDescriptors(oldFiles)
-            val newDeclarations = getDeclarationDescriptors(newFiles)
-
-            // Index the new declarations in the Kotlin source files that were just compiled, removing the old ones
-            index.updateIndexes(oldDeclarations, newDeclarations)
-        }
+        if (config.indexEnabled) return@launch
+        // Index the new declarations in the Kotlin source files that were just compiled, removing the old ones
+        index.updateIndexes(
+            getDeclarationDescriptors(oldFiles),
+            getDeclarationDescriptors(newFiles))
     }
 
     // Gets all the declaration descriptors for the collection of files

@@ -46,9 +46,9 @@ class KotlinTextDocumentService(
     private val log by findLogger
     private lateinit var client: LanguageClient
 
-    var debounceLint = Debouncer(Duration.ofMillis(config.linting.debounceTime))
+    var debounceLint = Debouncer(Duration.ofMillis(config.lintDebounceTime))
     fun updateDebouncer() {
-        debounceLint = Debouncer(Duration.ofMillis(config.linting.debounceTime))
+        debounceLint = Debouncer(Duration.ofMillis(config.lintDebounceTime))
     }
 
     val lintTodo = mutableSetOf<URI>()
@@ -123,7 +123,7 @@ class KotlinTextDocumentService(
             log.info{"Go-to-definition at ${describePosition(position)}"}
 
             val (file, cursor) = recover(position, Recompile.NEVER)
-            return goToDefinition(file, cursor, uriContentProvider.classContentProvider, tempDirectory, config.externalSources, cp)
+            return goToDefinition(file, cursor, uriContentProvider.classContentProvider, tempDirectory, config.useKlsScheme, cp)
                 ?.let(::listOf)
                 ?.let { Either.Left(it) }
                 ?: noResult("Couldn't find definition at ${describePosition(position)}", Either.Left(emptyList()))
@@ -152,7 +152,7 @@ class KotlinTextDocumentService(
             log.info{"Completing at ${describePosition(position)}"}
 
             val (file, cursor) = recover(position, Recompile.NEVER) // TODO: Investigate when to recompile
-            val completions = completions(file, cursor, sp.index, config.completion)
+            val completions = completions(file, cursor, sp.index, config.snippets)
             log.info("Found ${completions.items.size} items")
 
             return Either.Right(completions)

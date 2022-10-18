@@ -30,12 +30,12 @@ class KotlinLanguageServer(
 ) : LanguageServer, LanguageClientAware, Progress.Factory, Closeable {
     private val config = Configuration()
     private val compilerTmpDir = TempFile.createDirectory()
-    private val classPath = CompilerClassPath(config.compiler, compilerTmpDir.file, scope)
+    private val classPath = CompilerClassPath(config, compilerTmpDir.file, scope)
 
     private val tempDirectory = TemporaryDirectory()
     private val uriContentProvider = URIContentProvider(
         ClassContentProvider(
-            config.externalSources,
+            config,
             classPath,
             tempDirectory,
             CompositeSourceArchiveProvider(
@@ -44,7 +44,7 @@ class KotlinLanguageServer(
     private val sourcePath = SourcePath(
             classPath,
             uriContentProvider,
-            config.indexing,
+            config,
             scope,
             this)
     private val sourceFiles = SourceFiles(sourcePath, uriContentProvider)
@@ -96,7 +96,7 @@ class KotlinLanguageServer(
 
     override suspend fun initialize(params: InitializeParams): InitializeResult {
         val clientCapabilities = params.capabilities
-        config.completion.snippets.enabled = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false
+        config.snippets = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false
 
         if (clientCapabilities?.window?.workDoneProgress ?: false && client!=null) {
             progressFactory = LanguageClientProgress.Factory(client!!)

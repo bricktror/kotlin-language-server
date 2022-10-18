@@ -10,7 +10,6 @@ import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.Position
 import org.javacs.kt.CompiledFile
 import org.javacs.kt.logging.*
-import org.javacs.kt.CompletionConfiguration
 import org.javacs.kt.index.Symbol
 import org.javacs.kt.index.SymbolIndex
 import org.javacs.kt.util.containsCharactersInOrder
@@ -58,11 +57,11 @@ private const val MAX_COMPLETION_ITEMS = 75
 private const val MIN_SORT_LENGTH = 3
 
 /** Finds completions at the specified position. */
-fun completions(file: CompiledFile, cursor: Int, index: SymbolIndex, config: CompletionConfiguration): CompletionList {
+fun completions(file: CompiledFile, cursor: Int, index: SymbolIndex, allowSnippets: Boolean): CompletionList {
     val partial = findPartialIdentifier(file, cursor)
     log.debug("Looking for completions that match '${partial}'")
 
-    val (elementItems, element) = elementCompletionItems(file, cursor, config, partial)
+    val (elementItems, element) = elementCompletionItems(file, cursor, allowSnippets, partial)
     val elementItemList = elementItems.toList()
     val elementItemLabels = elementItemList.mapNotNull { it.label }.toSet()
 
@@ -160,7 +159,7 @@ private fun keywordCompletionItems(partial: String): Sequence<CompletionItem> =
 data class ElementCompletionItems(val items: Sequence<CompletionItem>, val element: KtElement? = null)
 
 /** Finds completions based on the element around the user's cursor. */
-private fun elementCompletionItems(file: CompiledFile, cursor: Int, config: CompletionConfiguration, partial: String): ElementCompletionItems {
+private fun elementCompletionItems(file: CompiledFile, cursor: Int, allowSnippets: Boolean, partial: String): ElementCompletionItems {
     val surroundingElement = completableElement(file, cursor) ?: return ElementCompletionItems(emptySequence())
     val completions = elementCompletions(file, cursor, surroundingElement)
 
@@ -169,14 +168,14 @@ private fun elementCompletionItems(file: CompiledFile, cursor: Int, config: Comp
         ?: matchesName.sortedBy { if (name(it).startsWith(partial)) 0 else 1 }
     val visible = sorted.filter(isVisible(file, cursor))
 
-    return ElementCompletionItems(visible.map { completionItem(it, surroundingElement, file, config) }, surroundingElement)
+    return ElementCompletionItems(visible.map { completionItem(it, surroundingElement, file, allowSnippets) }, surroundingElement)
 }
 
 private val callPattern = Regex("(.*)\\((?:\\$\\d+)?\\)(?:\\$0)?")
 private val methodSignature = Regex("""(?:fun|constructor) (?:<(?:[a-zA-Z\?\!\: ]+)(?:, [A-Z])*> )?([a-zA-Z]+\(.*\))""")
 
-private fun completionItem(d: DeclarationDescriptor, surroundingElement: KtElement, file: CompiledFile, config: CompletionConfiguration): CompletionItem {
-    val renderWithSnippets = config.snippets.enabled
+private fun completionItem(d: DeclarationDescriptor, surroundingElement: KtElement, file: CompiledFile, allowSnippets: Boolean): CompletionItem {
+    val renderWithSnippets = allowSnippets
         && surroundingElement !is KtCallableReferenceExpression
         && surroundingElement !is KtImportDirective
     val result = d.accept(RenderCompletionItem(renderWithSnippets), null)

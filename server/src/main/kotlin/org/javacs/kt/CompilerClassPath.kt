@@ -19,7 +19,7 @@ import org.javacs.kt.logging.*
  * and the compiler. Note that Kotlin sources are stored in SourcePath.
  */
 class CompilerClassPath(
-    private val config: CompilerConfiguration,
+    private val config: Configuration,
     val outputDirectory: File,
     private val scope: CoroutineScope,
 ) : Closeable {
@@ -40,8 +40,12 @@ class CompilerClassPath(
 
 
     init {
-        compiler.updateConfiguration(config)
+        compiler.updateConfiguration(config.jvmTarget)
     }
+    fun updateCompilerConfiguration() {
+        compiler.updateConfiguration(config.jvmTarget)
+    }
+
 
     /** Updates and possibly reinstantiates the compiler using new paths. */
     private fun refresh(
@@ -101,10 +105,6 @@ class CompilerClassPath(
 
         dest.removeAll(removed)
         dest.addAll(added)
-    }
-
-    fun updateCompilerConfiguration() {
-        compiler.updateConfiguration(config)
     }
 
     fun addWorkspaceRoot(root: Path): Boolean {

@@ -88,18 +88,16 @@ class KotlinWorkspaceService(
         settings?.get("kotlin")?.asJsonObject?.apply {
             // Update deprecated configuration keys
             get("debounceTime")?.asLong?.let {
-                config.linting.debounceTime = it
+                config.lintDebounceTime = it
                 docService.updateDebouncer()
             }
-            get("snippetsEnabled")?.asBoolean?.let { config.completion.snippets.enabled = it }
+            get("snippetsEnabled")?.asBoolean?.let { config.snippets = it }
 
             // Update compiler options
             get("compiler")?.asJsonObject?.apply {
-                val compiler = config.compiler
                 get("jvm")?.asJsonObject?.apply {
-                    val jvm = compiler.jvm
                     get("target")?.asString?.let {
-                        jvm.target = it
+                        config.jvmTarget=it
                         cp.updateCompilerConfiguration()
                     }
                 }
@@ -107,35 +105,30 @@ class KotlinWorkspaceService(
 
             // Update linter options
             get("linting")?.asJsonObject?.apply {
-                val linting = config.linting
                 get("debounceTime")?.asLong?.let {
-                    linting.debounceTime = it
+                    config.lintDebounceTime = it
                     docService.updateDebouncer()
                 }
             }
 
             // Update code-completion options
             get("completion")?.asJsonObject?.apply {
-                val completion = config.completion
                 get("snippets")?.asJsonObject?.apply {
-                    val snippets = completion.snippets
-                    get("enabled")?.asBoolean?.let { snippets.enabled = it }
+                    get("enabled")?.asBoolean?.let { config.snippets = it }
                 }
             }
 
             // Update indexing options
             get("indexing")?.asJsonObject?.apply {
-                val indexing = config.indexing
                 get("enabled")?.asBoolean?.let {
-                    indexing.enabled = it
+                    config.indexEnabled = it
                 }
             }
 
             // Update options about external sources e.g. JAR files, decompilers, etc
             get("externalSources")?.asJsonObject?.apply {
-                val externalSources = config.externalSources
-                get("useKlsScheme")?.asBoolean?.let { externalSources.useKlsScheme = it }
-                get("autoConvertToKotlin")?.asBoolean?.let { externalSources.autoConvertToKotlin = it }
+                get("useKlsScheme")?.asBoolean?.let { config.useKlsScheme = it }
+                get("autoConvertToKotlin")?.asBoolean?.let { config.autoConvertToKotlin = it }
             }
         }
 

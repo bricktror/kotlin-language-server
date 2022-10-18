@@ -25,7 +25,6 @@ import kotlin.script.experimental.host.ScriptingHostConfiguration
 import kotlin.script.experimental.host.configurationDependencies
 import kotlin.script.experimental.jvm.JvmDependency
 import kotlin.script.experimental.jvm.defaultJvmScriptingHostConfiguration
-import org.javacs.kt.CompilerConfiguration
 import org.javacs.kt.j2k.JavaElementConverter
 import org.javacs.kt.logging.*
 import org.javacs.kt.util.KotlinLSException
@@ -399,8 +398,8 @@ private class CompilationEnvironment(
         scripts = ScriptDefinitionProvider.getInstance(project)!! as CliScriptDefinitionProvider
     }
 
-    fun updateConfiguration(config: CompilerConfiguration) {
-        JvmTarget.fromString(config.jvm.target)
+    fun updateConfiguration(jvmTarget: String) {
+        JvmTarget.fromString(jvmTarget)
             ?.let { environment.configuration.put(JVMConfigurationKeys.JVM_TARGET, it) }
     }
 
@@ -468,9 +467,9 @@ class Compiler(
      * Updates the compiler environment using the given
      * configuration (which is a class from this project).
      */
-    fun updateConfiguration(config: CompilerConfiguration) {
-        defaultCompileEnvironment.updateConfiguration(config)
-        buildScriptCompileEnvironment?.updateConfiguration(config)
+    fun updateConfiguration(jvmTarget: String) {
+        defaultCompileEnvironment.updateConfiguration(jvmTarget)
+        buildScriptCompileEnvironment?.updateConfiguration(jvmTarget)
     }
 
     private fun createPsiFile(
