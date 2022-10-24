@@ -16,8 +16,9 @@ class LoggerTargetJulHandler(
 
     companion object {
         fun install(target: LoggerTarget) {
-            java.util.logging.Logger.getLogger("")
-                .addHandler(LoggerTargetJulHandler(target))
+            val logger=java.util.logging.Logger.getLogger("")
+            logger.getHandlers().forEach{logger.removeHandler(it)}
+            logger.addHandler(LoggerTargetJulHandler(target))
         }
     }
 }
