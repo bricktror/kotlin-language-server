@@ -1,38 +1,39 @@
 package org.javacs.kt.completion
 
 import com.google.common.cache.CacheBuilder
+import java.util.concurrent.TimeUnit
 import org.eclipse.lsp4j.CompletionItem
 import org.eclipse.lsp4j.CompletionItemKind
 import org.eclipse.lsp4j.CompletionItemTag
 import org.eclipse.lsp4j.CompletionList
-import org.eclipse.lsp4j.TextEdit
-import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.Position
-import org.javacs.kt.CompiledFile
-import org.javacs.kt.logging.*
+import org.eclipse.lsp4j.Range
+import org.eclipse.lsp4j.TextEdit
+import org.javacs.kt.getImportTextEditEntry
 import org.javacs.kt.index.Symbol
 import org.javacs.kt.index.SymbolIndex
+import org.javacs.kt.logging.*
+import org.javacs.kt.location
+import org.javacs.kt.source.CompiledFile
 import org.javacs.kt.util.containsCharactersInOrder
 import org.javacs.kt.util.findParent
 import org.javacs.kt.util.noResult
+import org.javacs.kt.util.onEachIndexed
 import org.javacs.kt.util.stringDistance
 import org.javacs.kt.util.toPath
-import org.javacs.kt.util.onEachIndexed
-import org.javacs.kt.position.location
-import org.javacs.kt.imports.getImportTextEditEntry
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.js.resolve.diagnostics.findPsi
+import org.jetbrains.kotlin.lexer.KtKeywordToken
+import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.java.descriptors.JavaMethodDescriptor
 import org.jetbrains.kotlin.load.java.sources.JavaSourceElement
 import org.jetbrains.kotlin.load.java.structure.JavaMethod
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
 import org.jetbrains.kotlin.psi.psiUtil.*
-import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.lexer.KtKeywordToken
+import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.descriptorUtil.*
@@ -44,9 +45,8 @@ import org.jetbrains.kotlin.resolve.scopes.getDescriptorsFiltered
 import org.jetbrains.kotlin.resolve.scopes.utils.parentsWithSelf
 import org.jetbrains.kotlin.types.KotlinType
 import org.jetbrains.kotlin.types.TypeUtils
-import org.jetbrains.kotlin.types.typeUtil.replaceArgumentsWithStarProjections
 import org.jetbrains.kotlin.types.checker.KotlinTypeChecker
-import java.util.concurrent.TimeUnit
+import org.jetbrains.kotlin.types.typeUtil.replaceArgumentsWithStarProjections
 
 private val log by findLogger.atToplevel(object{})
 
@@ -57,7 +57,7 @@ private const val MAX_COMPLETION_ITEMS = 75
 private const val MIN_SORT_LENGTH = 3
 
 /** Finds completions at the specified position. */
-fun completions(file: CompiledFile, cursor: Int, index: SymbolIndex, allowSnippets: Boolean): CompletionList {
+fun completions(file: CompiledFile, cursor: Int, index: SymbolIndex?, allowSnippets: Boolean): CompletionList {
     val partial = findPartialIdentifier(file, cursor)
     log.debug("Looking for completions that match '${partial}'")
 
@@ -89,7 +89,7 @@ private fun getQueryNameFromExpression(receiver: KtExpression?, cursor: Int, fil
 }
 
 /** Finds completions in the global symbol index, for potentially unimported symbols. */
-private fun indexCompletionItems(file: CompiledFile, cursor: Int, element: KtElement?, index: SymbolIndex, partial: String): Sequence<CompletionItem> {
+private fun indexCompletionItems(file: CompiledFile, cursor: Int, element: KtElement?, index: SymbolIndex?, partial: String): Sequence<CompletionItem> {
     val parsedFile = file.parse
     val imports = parsedFile.importDirectives
     // TODO: Deal with alias imports
@@ -116,9 +116,10 @@ private fun indexCompletionItems(file: CompiledFile, cursor: Int, element: KtEle
         else -> null
     }
 
-    return index
-        .query(partial, queryName, limit = MAX_COMPLETION_ITEMS)
-        .asSequence()
+    return (index
+        ?.query(partial, queryName?.asString(), limit = MAX_COMPLETION_ITEMS)
+        ?.asSequence()
+        ?: sequenceOf())
         .filter { it.kind != Symbol.Kind.MODULE } // Ignore global module/package name completions for now, since they cannot be 'imported'
         .filter { it.fqName.shortName() !in importedNames && it.fqName.parent() !in wildcardPackages }
         .filter {

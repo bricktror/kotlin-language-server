@@ -1,7 +1,6 @@
 package org.javacs.kt.classpath
 
 import org.javacs.kt.util.execAndReadStdoutAndStderr
-import org.javacs.kt.util.KotlinLSException
 import org.javacs.kt.util.isOSWindows
 import org.javacs.kt.util.findCommandOnPath
 import org.javacs.kt.logging.*
@@ -64,7 +63,7 @@ internal class GradleClassPathResolver(private val path: Path): ClassPathResolve
         } else {
             return workspace.parent?.let(::getGradleCommand)
                 ?: findCommandOnPath("gradle")
-                ?: throw KotlinLSException("Could not find 'gradle' on PATH")
+                ?: throw Error("Could not find 'gradle' on PATH")
         }
     }
 

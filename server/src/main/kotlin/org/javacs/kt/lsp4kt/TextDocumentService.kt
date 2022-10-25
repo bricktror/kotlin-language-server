@@ -113,9 +113,4 @@ private class JavaTextDocumentServiceFacade(
     override fun resolveCodeLens(unresolved: CodeLens) = launch {
         service.resolveCodeLens(unresolved)
     }
-
-    /* @Suppress("DEPRECATION") */
-    /* override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<List<JavaEither<SymbolInformation, DocumentSymbol>>> = scope.async { */
-    /*     throw Error("TODO") */
-    /* }.asCompletableFuture() */
 }

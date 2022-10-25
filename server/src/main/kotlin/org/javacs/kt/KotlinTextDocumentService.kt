@@ -1,62 +1,41 @@
 package org.javacs.kt
 
 import arrow.core.Either
-import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.services.LanguageClient
-import org.javacs.kt.codeaction.codeActions
-import org.javacs.kt.completion.*
-import org.javacs.kt.definition.goToDefinition
-import org.javacs.kt.diagnostic.convertDiagnostic
-import org.javacs.kt.formatting.formatKotlinCode
-import org.javacs.kt.hover.hoverAt
-import org.javacs.kt.position.offset
-import org.javacs.kt.position.extractRange
-import org.javacs.kt.position.position
-import org.javacs.kt.references.findReferences
-import org.javacs.kt.semantictokens.encodedSemanticTokens
-import org.javacs.kt.signaturehelp.fetchSignatureHelpAt
-import org.javacs.kt.symbols.documentSymbols
-import org.javacs.kt.util.noResult
-import org.javacs.kt.util.Debouncer
-import org.javacs.kt.util.filePath
-import org.javacs.kt.util.TemporaryDirectory
-import org.javacs.kt.util.parseURI
-import org.javacs.kt.util.describeURI
-import org.javacs.kt.util.describeURIs
-import org.javacs.kt.rename.renameSymbol
-import org.javacs.kt.highlight.documentHighlightsAt
-import org.javacs.kt.lsp4kt.*
-import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics
-import java.net.URI
 import java.io.Closeable
+import java.net.URI
 import java.nio.file.Path
 import java.time.Duration
 import kotlin.coroutines.*
 import kotlinx.coroutines.*
+import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.services.LanguageClient
+import org.javacs.kt.codeaction.codeActions
+import org.javacs.kt.completion.*
 import org.javacs.kt.logging.*
+import org.javacs.kt.lsp4kt.*
+import org.javacs.kt.source.CompiledFile
+import org.javacs.kt.source.FileContentProvider
+import org.javacs.kt.source.SourceFileRepository
+import org.javacs.kt.util.TemporaryDirectory
+import org.javacs.kt.util.describeURIs
+import org.javacs.kt.util.filePath
+import org.javacs.kt.util.noResult
+import org.javacs.kt.util.parseURI
+import org.jetbrains.kotlin.resolve.CompositeBindingContext
+import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics
 
 class KotlinTextDocumentService(
-    private val sf: SourceFiles,
-    private val sp: SourcePath,
-    private val config: Configuration,
+    private val sp: SourceFileRepository,
+    private val config: ()->Configuration,
     private val tempDirectory: TemporaryDirectory,
-    private val uriContentProvider: URIContentProvider,
+    private val fileContentProvider: FileContentProvider,
     private val cp: CompilerClassPath,
 ) : TextDocumentService, Closeable {
     private val log by findLogger
     private lateinit var client: LanguageClient
 
-    var debounceLint = Debouncer(Duration.ofMillis(config.lintDebounceTime))
-    fun updateDebouncer() {
-        debounceLint = Debouncer(Duration.ofMillis(config.lintDebounceTime))
-    }
-
     val lintTodo = mutableSetOf<URI>()
     var lintCount = 0
-
-    var lintRecompilationCallback: () -> Unit
-        get() = sp.beforeCompileCallback
-        set(callback) { sp.beforeCompileCallback = callback }
 
     private val TextDocumentItem.filePath: Path?
         get() = parseURI(uri).filePath
@@ -78,56 +57,41 @@ class KotlinTextDocumentService(
         ALWAYS, AFTER_DOT, NEVER
     }
 
-    private fun recover(position: TextDocumentPositionParams, recompile: Recompile): Pair<CompiledFile, Int> {
-        return recover(position.textDocument.uri, position.position, recompile)
-    }
+    private fun recover(position: TextDocumentPositionParams) =
+        recover(position.textDocument.uri, position.position)
 
-    private fun recover(uriString: String, position: Position, recompile: Recompile): Pair<CompiledFile, Int> {
-        val uri = parseURI(uriString)
-        val content = sp.content(uri)
-        val offset = offset(content, position.line, position.character)
-        val shouldRecompile = when (recompile) {
-            Recompile.ALWAYS -> true
-            Recompile.AFTER_DOT -> offset > 0 && content[offset - 1] == '.'
-            Recompile.NEVER -> false
+    private fun recover(uriString: String, position: Position): Pair<CompiledFile, Int> =
+        sp.compileFile(parseURI(uriString)).let{
+            it.asCompiledFile() to offset(it.content, position.line, position.character)
         }
-        val compiled = if (shouldRecompile) sp.currentVersion(uri) else sp.latestCompiledVersion(uri)
-        return Pair(compiled, offset)
-    }
 
     override suspend fun codeAction(params: CodeActionParams): List<Either<Command, CodeAction>> {
-        val (file, _) = recover(params.textDocument.uri, params.range.start, Recompile.NEVER)
+        val (file, _) = recover(params.textDocument.uri, params.range.start)
         return codeActions(file, sp.index, params.range, params.context)
     }
 
     override suspend fun hover(position: HoverParams): Hover? {
-        reportTime {
-            log.info{"Hovering at ${describePosition(position)}"}
-
-            val (file, cursor) = recover(position, Recompile.NEVER)
-            return hoverAt(file, cursor) ?: noResult("No hover found at ${describePosition(position)}", null)
-        }
+        log.info{"Hovering at ${describePosition(position)}"}
+        val (file, cursor) = recover(position)
+        return hoverAt(file, cursor) ?: noResult("No hover found at ${describePosition(position)}", null)
     }
 
     override suspend fun documentHighlight(position: DocumentHighlightParams): List<DocumentHighlight> {
-        val (file, cursor) = recover(position.textDocument.uri, position.position, Recompile.NEVER)
+        val (file, cursor) = recover(position)
         return documentHighlightsAt(file, cursor)
     }
 
     override suspend fun onTypeFormatting(params: DocumentOnTypeFormattingParams): List<TextEdit> {
-        TODO("not implemented")
+        TODO()
     }
 
     override suspend fun definition(position: DefinitionParams): Either<List<Location>, List<LocationLink>> {
-        reportTime {
-            log.info{"Go-to-definition at ${describePosition(position)}"}
-
-            val (file, cursor) = recover(position, Recompile.NEVER)
-            return goToDefinition(file, cursor, uriContentProvider.classContentProvider, tempDirectory, config.useKlsScheme, cp)
-                ?.let(::listOf)
-                ?.let { Either.Left(it) }
-                ?: noResult("Couldn't find definition at ${describePosition(position)}", Either.Left(emptyList()))
-        }
+        log.info{"Go-to-definition at ${describePosition(position)}"}
+        val (file, cursor) = recover(position)
+        return goToDefinition(file, cursor, fileContentProvider, tempDirectory, cp)
+            ?.let(::listOf)
+            ?.let { Either.Left(it) }
+            ?: noResult("Couldn't find definition at ${describePosition(position)}", Either.Left(emptyList()))
     }
 
     override suspend fun rangeFormatting(params: DocumentRangeFormattingParams): List<TextEdit> {
@@ -139,75 +103,58 @@ class KotlinTextDocumentService(
     }
 
     override suspend fun codeLens(params: CodeLensParams): List<CodeLens> {
-        TODO("not implemented")
+        TODO()
     }
 
     override suspend fun rename(params: RenameParams) :WorkspaceEdit? {
-        val (file, cursor) = recover(params, Recompile.NEVER)
+        val (file, cursor) = recover(params)
         return renameSymbol(file, cursor, sp, params.newName)
     }
 
     override suspend fun completion(position: CompletionParams):Either<List<CompletionItem>, CompletionList> {
-        reportTime {
-            log.info{"Completing at ${describePosition(position)}"}
-
-            val (file, cursor) = recover(position, Recompile.NEVER) // TODO: Investigate when to recompile
-            val completions = completions(file, cursor, sp.index, config.snippets)
-            log.info("Found ${completions.items.size} items")
-
-            return Either.Right(completions)
-        }
+        log.info{"Completing at ${describePosition(position)}"}
+        val (file, cursor) = recover(position) // TODO: Investigate when to recompile
+        val completions = completions(file, cursor, sp.index, config().snippets)
+        log.info("Found ${completions.items.size} items")
+        return Either.Right(completions)
     }
 
     override suspend fun resolveCompletionItem(unresolved: CompletionItem): CompletionItem {
-        TODO("not implemented")
+        TODO()
     }
 
-    /* @Suppress("DEPRECATION") */
-    /* override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> = scope.async { */
-    /*     log.info{"Find symbols in ${describeURI(params.textDocument.uri)}"} */
-
-    /*     reportTime { */
-    /*         val uri = parseURI(params.textDocument.uri) */
-    /*         val parsed = sp.parsedFile(uri) */
-
-    /*         documentSymbols(parsed) */
-    /*     } */
-    /* }.asCompletableFuture() */
-
     override fun didOpen(params: DidOpenTextDocumentParams) {
-        val uri = parseURI(params.textDocument.uri)
-        sf.open(uri, params.textDocument.text, params.textDocument.version)
-        lintNow(uri)
+        with(params.textDocument) {
+            val parsedUri = parseURI(uri)
+            sp.applyManualEdit(parsedUri, version, text)
+            lintNow(parsedUri)
+        }
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {
         // Lint after saving to prevent inconsistent diagnostics
         val uri = parseURI(params.textDocument.uri)
         lintNow(uri)
-        debounceLint.schedule {
-            sp.save(uri)
-        }
+        /* debounceLint.schedule { */
+        /*     sp.save(uri) */
+        /* } */
     }
 
     override suspend fun signatureHelp(position: SignatureHelpParams): SignatureHelp? {
-        reportTime {
-            log.info{"Signature help at ${describePosition(position)}"}
-
-            val (file, cursor) = recover(position, Recompile.NEVER)
-            return fetchSignatureHelpAt(file, cursor) ?: noResult("No function call around ${describePosition(position)}", null)
-        }
+        log.info{"Signature help at ${describePosition(position)}"}
+        val (file, cursor) = recover(position)
+        return fetchSignatureHelpAt(file, cursor) ?: noResult("No function call around ${describePosition(position)}", null)
     }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = parseURI(params.textDocument.uri)
-        sf.close(uri)
+        sp.closeTransient(uri)
         clearDiagnostics(uri)
     }
 
     override suspend fun formatting(params: DocumentFormattingParams): List<TextEdit> {
         val code = params.textDocument.content
-        log.info{"Formatting ${describeURI(params.textDocument.uri)}"}
+        log.info{"Formatting ${params.textDocument.uri}"}
         return listOf(TextEdit(
             Range(Position(0, 0), position(code, code.length)),
             formatKotlinCode(code, params.options)
@@ -215,9 +162,11 @@ class KotlinTextDocumentService(
     }
 
     override fun didChange(params: DidChangeTextDocumentParams) {
-        val uri = parseURI(params.textDocument.uri)
-        sf.edit(uri, params.textDocument.version, params.contentChanges)
-        lintLater(uri)
+        with(params) {
+            val parsedUri = parseURI(textDocument.uri)
+            sp.applyManualEdit(parsedUri, textDocument.version, contentChanges)
+            lintLater(parsedUri)
+        }
     }
 
     override suspend fun references(position: ReferenceParams): List<Location>
@@ -229,69 +178,52 @@ class KotlinTextDocumentService(
             } ?: listOf<Location>()
 
     override suspend fun semanticTokensFull(params: SemanticTokensParams): SemanticTokens {
-        log.info{"Full semantic tokens in ${describeURI(params.textDocument.uri)}"}
-
-        reportTime {
-            val uri = parseURI(params.textDocument.uri)
-            val file = sp.currentVersion(uri)
-
-            val tokens = encodedSemanticTokens(file)
-            log.info("Found ${tokens.size} tokens")
-
-            return SemanticTokens(tokens)
-        }
+        log.info{"Full semantic tokens in ${params.textDocument.uri}"}
+        val file = sp.currentVersion(parseURI(params.textDocument.uri))!!
+        val tokens = encodedSemanticTokens(file)
+        log.info("Found ${tokens.size} tokens")
+        return SemanticTokens(tokens)
     }
 
     override suspend fun semanticTokensRange(params: SemanticTokensRangeParams): SemanticTokens {
-        log.info{"Ranged semantic tokens in ${describeURI(params.textDocument.uri)}"}
+        log.info{"Ranged semantic tokens in ${params.textDocument.uri}"}
 
-        reportTime {
-            val uri = parseURI(params.textDocument.uri)
-            val file = sp.currentVersion(uri)
+        val file = sp.currentVersion(parseURI(params.textDocument.uri))!!
 
-            val tokens = encodedSemanticTokens(file, params.range)
-            log.info("Found ${tokens.size} tokens")
+        val tokens = encodedSemanticTokens(file, params.range)
+        log.info("Found ${tokens.size} tokens")
 
-            return SemanticTokens(tokens)
-        }
+        return SemanticTokens(tokens)
     }
 
     override suspend fun resolveCodeLens(unresolved: CodeLens): CodeLens {
-        TODO("not implemented")
+        TODO()
     }
 
-    private fun describePosition(position: TextDocumentPositionParams): String {
-        return "${describeURI(position.textDocument.uri)} ${position.position.line + 1}:${position.position.character + 1}"
-    }
+    private fun describePosition(position: TextDocumentPositionParams): String =
+        "${position.textDocument.uri} ${position.position.line + 1}:${position.position.character + 1}"
 
     fun lintAll() {
-        debounceLint.submitImmediately {
-            sp.compileAllFiles()
-            sp.saveAllFiles()
-            sp.refreshDependencyIndexes()
-        }
-    }
-
-    private fun clearLint(): List<URI> {
-        val result = lintTodo.toList()
-        lintTodo.clear()
-        return result
+        /* debounceLint.submitImmediately { */
+        /*     sp.compileAllFiles() */
+        /*     sp.refreshDependencyIndexes() */
+        /* } */
     }
 
     private fun lintLater(uri: URI) {
-        lintTodo.add(uri)
-        debounceLint.schedule(::doLint)
+        /* lintTodo.add(uri) */
+        /* debounceLint.schedule(::doLint) */
     }
 
     private fun lintNow(file: URI) {
-        lintTodo.add(file)
-        debounceLint.submitImmediately(::doLint)
+        /* lintTodo.add(file) */
+        /* debounceLint.submitImmediately(::doLint) */
     }
 
     private fun doLint(cancelCallback: () -> Boolean) {
         log.info{"Linting ${describeURIs(lintTodo)}"}
-        val files = clearLint()
-        val context = sp.compileFiles(files)
+        val files = lintTodo.toList().also{ lintTodo.clear() }
+        val context = CompositeBindingContext.create( sp.compileFiles(files).map{it.context})
         if (!cancelCallback.invoke()) {
             reportDiagnostics(files, context.diagnostics)
         }
@@ -303,11 +235,12 @@ class KotlinTextDocumentService(
         val byFile = langServerDiagnostics.groupBy({ it.first }, { it.second })
 
         for ((uri, diagnostics) in byFile) {
-            if (sf.isOpen(uri)) {
-                client.publishDiagnostics(PublishDiagnosticsParams(uri.toString(), diagnostics))
-                log.info{"Reported ${diagnostics.size} diagnostics in ${describeURI(uri)}"}
+            if (!sp.hasManualEdit(uri)) {
+                log.info{"Ignore ${diagnostics.size} diagnostics in ${uri} because it's not open"}
+                continue
             }
-            else log.info{"Ignore ${diagnostics.size} diagnostics in ${describeURI(uri)} because it's not open"}
+            client.publishDiagnostics(PublishDiagnosticsParams(uri.toString(), diagnostics))
+            log.info{"Reported ${diagnostics.size} diagnostics in ${uri}"}
         }
 
         val noErrors = compiled - byFile.keys
@@ -325,16 +258,6 @@ class KotlinTextDocumentService(
     }
 
     override fun close() {
-        debounceLint.shutdown(true)
-    }
-
-    private inline fun<T> reportTime(block: () -> T): T {
-        val started = System.currentTimeMillis()
-        try {
-            return block()
-        } finally {
-            val finished = System.currentTimeMillis()
-            log.info("Finished in ${finished-started} ms")
-        }
+        /* debounceLint.shutdown(true) */
     }
 }

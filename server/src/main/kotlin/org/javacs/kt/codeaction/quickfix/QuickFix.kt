@@ -5,7 +5,7 @@ import org.eclipse.lsp4j.CodeAction
 import org.eclipse.lsp4j.Command
 import org.eclipse.lsp4j.Diagnostic
 import org.eclipse.lsp4j.Range
-import org.javacs.kt.CompiledFile
+import org.javacs.kt.source.CompiledFile
 import org.javacs.kt.index.SymbolIndex
 import org.javacs.kt.util.isSubrangeOf
 import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics
@@ -13,7 +13,7 @@ import org.jetbrains.kotlin.diagnostics.Diagnostic as KotlinDiagnostic
 
 interface QuickFix {
     // Computes the quickfix. Return empty list if the quickfix is not valid or no alternatives exist.
-    fun compute(file: CompiledFile, index: SymbolIndex, range: Range, diagnostics: List<Diagnostic>): List<Either<Command, CodeAction>>
+    fun compute(file: CompiledFile, index: SymbolIndex?, range: Range, diagnostics: List<Diagnostic>): List<Either<Command, CodeAction>>
 }
 
 fun diagnosticMatch(diagnostic: Diagnostic, range: Range, diagnosticTypes: Set<String>): Boolean =

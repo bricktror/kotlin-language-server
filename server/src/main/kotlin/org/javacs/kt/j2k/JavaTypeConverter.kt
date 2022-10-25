@@ -3,6 +3,15 @@ package org.javacs.kt.j2k
 import org.javacs.kt.logging.*
 import com.intellij.psi.*
 
+private fun platformType(javaType: String): String = when (javaType) {
+    "List" -> "MutableList"
+    "Set" -> "MutableSet"
+    "Collection" -> "MutableCollection"
+    "Integer" -> "Int"
+    "Character" -> "Char"
+    else -> javaType
+}
+
 object JavaTypeConverter : PsiTypeVisitor<String>() {
     private val log by findLogger
     override fun visitType(type: PsiType): String {

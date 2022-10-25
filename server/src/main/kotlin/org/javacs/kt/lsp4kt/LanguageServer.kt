@@ -4,14 +4,16 @@ import java.util.concurrent.CompletableFuture
 import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
 import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.jsonrpc.services.JsonDelegate
 import org.eclipse.lsp4j.services.LanguageServer as JavaLanguageServer
-import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
 import org.eclipse.lsp4j.services.TextDocumentService as JavaTextDocumentService
+import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
 import org.javacs.kt.logging.*
 
 interface LanguageServer {
     val textDocumentService: TextDocumentService
     val workspaceService: WorkspaceService
+    val extensions: ProtocolExtensions
     fun exit() {}
     suspend fun initialize(params: InitializeParams): InitializeResult
     suspend fun shutdown(): Any?
@@ -29,6 +31,7 @@ class JavaLanguageServerFacade(
 
     override fun getTextDocumentService(): JavaTextDocumentService = service.textDocumentService.asLsp4j(scope)
     override fun getWorkspaceService(): JavaWorkspaceService = service.workspaceService.asLsp4j(scope)
+    @JsonDelegate fun getExtensionsService(): JavaProtocolExtensions = service.extensions.asLsp4j(scope)
 
     override fun initialize(params: InitializeParams) = launch {
         service.initialize(params)

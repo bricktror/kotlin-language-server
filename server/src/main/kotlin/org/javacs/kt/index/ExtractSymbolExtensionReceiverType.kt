@@ -12,3 +12,7 @@ object ExtractSymbolExtensionReceiverType : DeclarationDescriptorVisitorEmptyBod
 
     override fun visitVariableDescriptor(desc: VariableDescriptor, nothing: Unit?) = desc.extensionReceiverParameter?.let(this::convert)
 }
+
+val DeclarationDescriptor.receiverTypeFqn
+    get() = accept(ExtractSymbolExtensionReceiverType, Unit)
+                ?.takeUnless{ it.isRoot }

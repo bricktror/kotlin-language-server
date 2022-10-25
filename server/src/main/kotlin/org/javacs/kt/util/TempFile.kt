@@ -35,7 +35,7 @@ class TempFile : Closeable {
 
         fun createDirectory(
             name: String = "kotlinlangserver"
-        ): TempFile = TempFile(Files.createTempDirectory(name))
+        ) = TemporaryDirectory(name)
 
         /** Create a temporary file, run the initializer function and return the lines of the file */
         fun linesFrom(
@@ -55,5 +55,26 @@ class TempFile : Closeable {
             initFile: ((path: Path) -> Unit)
         ) = create("kotlin-language-server", null, initFile)
             .use { it.file.readLines() }
+    }
+}
+
+/**
+ * A directory in which temporary files may be created.
+ * The advantage of using this class over a standard
+ * function such as Files.createTempFile is that all
+ * temp files in the directory can easily be disposed
+ * of once no longer needed.
+ */
+class TemporaryDirectory(prefix: String = "kotlinlangserver") : Closeable {
+    val dirPath: Path = Files.createTempDirectory(prefix)
+    val file get() = dirPath.toFile()
+
+    fun createTempFile(prefix: String = "tmp", suffix: String = ""): Path =
+        Files.createTempFile(dirPath, prefix, suffix)
+
+    override fun close() {
+        if (Files.exists(dirPath)) {
+            dirPath.toFile().deleteRecursively()
+        }
     }
 }

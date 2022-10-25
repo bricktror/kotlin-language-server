@@ -4,6 +4,14 @@ import org.javacs.kt.logging.*
 import com.intellij.psi.*
 import com.intellij.psi.javadoc.*
 
+private val platformImports = setOf(
+    "java.util.List",
+    "java.util.Set"
+)
+
+private fun isPlatformImport(fqJavaType: String) =
+    platformImports.contains(fqJavaType)
+
 /**
  * A Psi visitor that converts Java elements into
  * Kotlin code.

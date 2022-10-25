@@ -2,26 +2,26 @@ package org.javacs.kt.codeaction.quickfix
 
 import arrow.core.Either
 import org.eclipse.lsp4j.*
-import org.javacs.kt.CompiledFile
 import org.javacs.kt.index.SymbolIndex
-import org.javacs.kt.position.offset
-import org.javacs.kt.position.position
+import org.javacs.kt.createFunctionStub
+import org.javacs.kt.createVariableStub
+import org.javacs.kt.getClassDescriptor
+import org.javacs.kt.getDeclarationPadding
+import org.javacs.kt.getNewMembersStartPosition
+import org.javacs.kt.getSuperClassTypeProjections
+import org.javacs.kt.hasNoBody
+import org.javacs.kt.overridesDeclaration
+import org.javacs.kt.offset
+import org.javacs.kt.position
+import org.javacs.kt.source.CompiledFile
 import org.javacs.kt.util.toPath
-import org.javacs.kt.overridemembers.createFunctionStub
-import org.javacs.kt.overridemembers.createVariableStub
-import org.javacs.kt.overridemembers.getClassDescriptor
-import org.javacs.kt.overridemembers.getDeclarationPadding
-import org.javacs.kt.overridemembers.getNewMembersStartPosition
-import org.javacs.kt.overridemembers.getSuperClassTypeProjections
-import org.javacs.kt.overridemembers.hasNoBody
-import org.javacs.kt.overridemembers.overridesDeclaration
-import org.jetbrains.kotlin.descriptors.ClassDescriptor
 import org.jetbrains.kotlin.descriptors.ClassConstructorDescriptor
+import org.jetbrains.kotlin.descriptors.ClassDescriptor
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
+import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.PropertyDescriptor
 import org.jetbrains.kotlin.descriptors.isInterface
-import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.js.resolve.diagnostics.findPsi
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtClass
@@ -41,7 +41,7 @@ import org.jetbrains.kotlin.types.TypeProjection
 import org.jetbrains.kotlin.types.typeUtil.asTypeProjection
 
 class ImplementAbstractMembersQuickFix : QuickFix {
-    override fun compute(file: CompiledFile, index: SymbolIndex, range: Range, diagnostics: List<Diagnostic>): List<Either<Command, CodeAction>> {
+    override fun compute(file: CompiledFile, index: SymbolIndex?, range: Range, diagnostics: List<Diagnostic>): List<Either<Command, CodeAction>> {
         val diagnostic = findDiagnosticMatch(diagnostics, range)
 
         val startCursor = offset(file.content, range.start)

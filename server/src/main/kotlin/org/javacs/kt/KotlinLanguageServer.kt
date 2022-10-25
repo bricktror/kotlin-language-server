@@ -1,22 +1,8 @@
 package org.javacs.kt
 
-import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.jsonrpc.messages.Either
-import org.eclipse.lsp4j.jsonrpc.services.JsonDelegate
-import org.eclipse.lsp4j.services.LanguageClient
-import org.eclipse.lsp4j.services.LanguageClientAware
-import org.eclipse.lsp4j.services.NotebookDocumentService
-import org.eclipse.lsp4j.services.TextDocumentService as JavaTextDocumentService
-import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
-import org.javacs.kt.command.ALL_COMMANDS
-import org.javacs.kt.externalsources.*
-import org.javacs.kt.util.TemporaryDirectory
-import org.javacs.kt.util.TempFile
-import org.javacs.kt.util.parseURI
-import org.javacs.kt.progress.*
-import org.javacs.kt.semantictokens.semanticTokensLegend
-import org.javacs.kt.logging.*
-import org.javacs.kt.lsp4kt.*
+import com.google.gson.Gson
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import java.io.Closeable
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
@@ -24,55 +10,95 @@ import java.util.concurrent.CompletableFuture.completedFuture
 import java.util.logging.Level
 import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
+import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.jsonrpc.messages.Either
+import org.eclipse.lsp4j.services.LanguageClient
+import org.eclipse.lsp4j.services.LanguageClientAware
+import org.eclipse.lsp4j.services.NotebookDocumentService
+import org.eclipse.lsp4j.services.TextDocumentService as JavaTextDocumentService
+import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
+import org.javacs.kt.Compiler
+import org.javacs.kt.externalsources.*
+import org.javacs.kt.index.SymbolIndex
+import org.javacs.kt.logging.*
+import org.javacs.kt.lsp4kt.*
+import org.javacs.kt.extractRange
+import org.javacs.kt.semanticTokensLegend
+import org.javacs.kt.source.*
+import org.javacs.kt.util.TempFile
+import org.javacs.kt.util.TemporaryDirectory
+import org.javacs.kt.util.parseURI
 
 class KotlinLanguageServer(
     scope: CoroutineScope,
-) : LanguageServer, LanguageClientAware, Progress.Factory, Closeable {
+) : LanguageServer, LanguageClientAware, Closeable {
     private val config = Configuration()
     private val compilerTmpDir = TempFile.createDirectory()
-    private val classPath = CompilerClassPath(config, compilerTmpDir.file, scope)
+    private val classPath = CompilerClassPath(config, compilerTmpDir)
+
+    private var compiler = classPath.createCompiler()
 
     private val tempDirectory = TemporaryDirectory()
-    private val uriContentProvider = URIContentProvider(
-        ClassContentProvider(
-            config,
-            classPath,
-            tempDirectory,
-            CompositeSourceArchiveProvider(
-                JdkSourceArchiveProvider(classPath),
-                ClassPathSourceArchiveProvider(classPath))))
-    private val sourcePath = SourcePath(
-            classPath,
-            uriContentProvider,
-            config,
-            scope,
-            this)
-    private val sourceFiles = SourceFiles(sourcePath, uriContentProvider)
+
+    private val contentProvider = SchemeDelegatingFileContentProvider(mapOf(
+        "file" to localFileSystemContentProvider,
+        "kls" to ClassContentProvider(),
+    ))
+
+    private val sourceFileRepository = SourceFileRepository(
+            compiler,
+            contentProvider,
+            SymbolIndex())
 
     override val textDocumentService = KotlinTextDocumentService(
-        sourceFiles,
-        sourcePath,
-        config,
+        sourceFileRepository,
+        {config},
         tempDirectory,
-        uriContentProvider,
+        contentProvider,
         classPath)
+
+    private val workspaceActions = mapOf<String, (List<Any>)->Any?>(
+        "convertJavaToKotlin" to { args ->
+            val gson = Gson()
+            val fileUri = (args[0] as JsonElement).asString
+            val range = gson.fromJson(args[1] as JsonElement, Range::class.java)
+
+            sourceFileRepository
+            //Get the segment that should be converted
+            .content(parseURI(fileUri))
+            .let{extractRange(it, range)}
+            // Apply the conversion
+            .let{compiler.transpileJavaToKotlin(it)}
+            // Wrap as an text-document edit
+            .let{listOf(TextEdit(range, it))}
+            .let{TextDocumentEdit(
+                    // TODO more arguments to the identitifer?
+                    VersionedTextDocumentIdentifier().apply { uri = fileUri },
+                    it)
+            }
+            // Wrap as an workspace edit
+            .let{listOf(Either.forLeft<TextDocumentEdit, ResourceOperation>( it))}
+            .let{WorkspaceEdit(it)}
+            // Apply the edit to the client
+            .let{ApplyWorkspaceEditParams(it)}
+            .also{client?.applyEdit(it)}
+        },
+    )
+
     override val workspaceService = KotlinWorkspaceService(
-        sourceFiles,
-        sourcePath,
+        sourceFileRepository,
         classPath,
         textDocumentService,
-        config)
+        config,
+        workspaceActions)
 
-    private val protocolExtensions = KotlinProtocolExtensionService(
-        uriContentProvider,
+    override val extensions = KotlinProtocolExtensionService(
+        contentProvider,
         classPath,
-        sourcePath,
+        sourceFileRepository,
         scope)
 
     private var client: LanguageClient? = null
-
-    private var progressFactory: Progress.Factory = Progress.Factory.None
-    override fun create(label: String) = progressFactory.create(label)
 
     companion object {
         private val log by findLogger
@@ -83,6 +109,17 @@ class KotlinLanguageServer(
         }
     }
 
+    init {
+        classPath.onNewCompiler={
+            log.info("Reinstantiating compiler")
+            compiler=it
+            sourceFileRepository.refresh()
+        }
+        workspaceService.onConfigChange={
+            compiler=classPath.createCompiler()
+        }
+    }
+
     override fun connect(client: LanguageClient) {
         this.client = client
         workspaceService.connect(client)
@@ -90,43 +127,26 @@ class KotlinLanguageServer(
         log.info("Connected to client")
     }
 
-
-    @JsonDelegate
-    fun getProtocolExtensionService(): KotlinProtocolExtensions = protocolExtensions
-
     override suspend fun initialize(params: InitializeParams): InitializeResult {
         val clientCapabilities = params.capabilities
         config.snippets = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false
 
-        if (clientCapabilities?.window?.workDoneProgress ?: false && client!=null) {
-            progressFactory = LanguageClientProgress.Factory(client!!)
-        }
+        /* if (clientCapabilities?.window?.workDoneProgress ?: false && client!=null) { */
+            /* progressFactory = LanguageClientProgress.Factory(client!!) */
+        /* } */
 
-        @Suppress("DEPRECATION")
-        val folders = params.workspaceFolders?.takeIf { it.isNotEmpty() }
-            ?: params.rootUri?.let(::WorkspaceFolder)?.let(::listOf)
-            ?: params.rootPath?.let(Paths::get)?.toUri()?.toString()?.let(::WorkspaceFolder)?.let(::listOf)
-            ?: listOf()
+        /* (params.workDoneToken */
+        /*     ?.takeIf { client!=null } */
+        /*     ?.let { LanguageClientProgress("Workspace folders", it, client!!) } */
+        /*     ?: Progress.None).use { */
+                /* it.reportSequentially(folders, {it.toString()}) { folder -> */
+                    /* sourceFiles.addWorkspaceRoot(folder) */
+                /* } */
+            /* } */
 
-        (params.workDoneToken
-            ?.takeIf { client!=null }
-            ?.let { LanguageClientProgress("Workspace folders", it, client!!) }
-            ?: Progress.None).use {
-                it.reportSequentially(folders, {it.name}) { folder ->
-                    log.info("Adding workspace folder ${folder.name}")
-
-                    report("Updating source path")
-                    val root = Paths.get(parseURI(folder.uri))
-                    sourceFiles.addWorkspaceRoot(root)
-
-                    report("Updating class path")
-                    val refreshed = classPath.addWorkspaceRoot(root)
-                    if (refreshed) {
-                        report("Refreshing source path")
-                        sourcePath.refresh()
-                    }
-                }
-            }
+        params.workspaceFolders
+            .map{parseURI(it.uri)}
+            .forEach{ workspaceService.addWorkspaceRoot(it) }
 
         textDocumentService.lintAll()
 
@@ -157,14 +177,14 @@ class KotlinLanguageServer(
                 completionProvider = CompletionOptions(false, listOf("."))
                 signatureHelpProvider = SignatureHelpOptions(listOf("(", ","))
                 semanticTokensProvider = SemanticTokensWithRegistrationOptions(semanticTokensLegend, true, true)
-                executeCommandProvider = ExecuteCommandOptions(ALL_COMMANDS)
+                executeCommandProvider = ExecuteCommandOptions(workspaceActions.keys.toList())
             }
         }
     }
 
     override fun close() {
         textDocumentService.close()
-        classPath.close()
+        compiler.close()
         tempDirectory.close()
         compilerTmpDir.close()
     }

@@ -1,169 +1,158 @@
 package org.javacs.kt
 
-import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.services.LanguageClient
-import org.eclipse.lsp4j.services.LanguageClientAware
-import org.eclipse.lsp4j.jsonrpc.messages.Either
-import org.javacs.kt.symbols.workspaceSymbols
-import org.javacs.kt.command.JAVA_TO_KOTLIN_COMMAND
-import org.javacs.kt.j2k.convertJavaToKotlin
-import org.javacs.kt.position.extractRange
-import org.javacs.kt.util.filePath
-import org.javacs.kt.util.parseURI
-import org.javacs.kt.lsp4kt.*
+import com.google.gson.Gson
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.intellij.lang.Language
+import com.intellij.lang.java.JavaLanguage
+import java.io.BufferedReader
+import java.io.FileNotFoundException
+import java.io.IOException
+import java.io.StringReader
+import java.io.StringWriter
+import java.net.URI
+import java.nio.file.FileSystems
+import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
-import com.google.gson.JsonElement
-import com.google.gson.Gson
-import com.google.gson.JsonObject
+import kotlin.io.path.toPath
+import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.TextDocumentContentChangeEvent
+import org.eclipse.lsp4j.jsonrpc.messages.Either
+import org.eclipse.lsp4j.services.LanguageClient
+import org.eclipse.lsp4j.services.LanguageClientAware
 import org.javacs.kt.logging.*
-
+import org.javacs.kt.lsp4kt.*
+import org.javacs.kt.source.FileContentProvider
+import org.javacs.kt.source.SourceFileRepository
+import org.javacs.kt.util.describeURI
+import org.javacs.kt.util.describeURIs
+import org.javacs.kt.util.filePath
+import org.javacs.kt.util.parseURI
+import org.javacs.kt.util.partitionAroundLast
+import org.jetbrains.kotlin.idea.KotlinLanguage
 
 class KotlinWorkspaceService(
-    private val sf: SourceFiles,
-    private val sp: SourcePath,
+    private val sp: SourceFileRepository,
     private val cp: CompilerClassPath,
     private val docService: KotlinTextDocumentService,
-    private val config: Configuration
+    private val config: Configuration,
+    private val commands: Map<String, (List<Any>)->Any?>,
 ) : WorkspaceService, LanguageClientAware {
     private val log by findLogger
-    private val gson = Gson()
     private var languageClient: LanguageClient? = null
 
     override fun connect(client: LanguageClient): Unit {
         languageClient = client
     }
 
-    override suspend fun executeCommand(params: ExecuteCommandParams): Any {
-        val args = params.arguments
+    override suspend fun executeCommand(params: ExecuteCommandParams): Any? {
         log.info("Executing command: ${params.command} with ${params.arguments}")
-
-        when (params.command) {
-            JAVA_TO_KOTLIN_COMMAND -> {
-                val fileUri = gson.fromJson(args[0] as JsonElement, String::class.java)
-                val range = gson.fromJson(args[1] as JsonElement, Range::class.java)
-
-                val selectedJavaCode = extractRange(sp.content(parseURI(fileUri)), range)
-                val kotlinCode = convertJavaToKotlin(selectedJavaCode, cp.compiler)
-
-                languageClient?.applyEdit(ApplyWorkspaceEditParams(WorkspaceEdit(listOf(Either.forLeft<TextDocumentEdit, ResourceOperation>(
-                    TextDocumentEdit(
-                        VersionedTextDocumentIdentifier().apply { uri = fileUri },
-                        listOf(TextEdit(range, kotlinCode))
-                    )
-                )))))
-            }
-        }
-
-        return CompletableFuture.completedFuture(null)
+        return commands.get(params.command)
+                .also { if(it==null) log.warning{"Unhandled command workspace/${params.command}(${params.arguments})" } }
+                ?.invoke(params.arguments)
     }
 
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
-        for (change in params.changes) {
-            val uri = parseURI(change.uri)
-            val path = uri.filePath
-
-            when (change.type) {
-                FileChangeType.Created -> {
-                    sf.createdOnDisk(uri)
-                    path?.let(cp::createdOnDisk)?.let { if (it) sp.refresh() }
-                }
-                FileChangeType.Deleted -> {
-                    sf.deletedOnDisk(uri)
-                    path?.let(cp::deletedOnDisk)?.let { if (it) sp.refresh() }
-                }
-                FileChangeType.Changed -> {
-                    sf.changedOnDisk(uri)
-                    path?.let(cp::changedOnDisk)?.let { if (it) sp.refresh() }
-                }
-                null -> {
-                    // Nothing to do
-                }
-            }
-        }
+        params.changes
+            .map { parseURI(it.uri) to it.type }
+            .forEach { (uri,type)-> when (type) {
+                FileChangeType.Created -> createdOnDisk(uri)
+                FileChangeType.Deleted -> deletedOnDisk(uri)
+                FileChangeType.Changed -> changedOnDisk(uri)
+                null -> Unit
+            } }
     }
+
+    var onConfigChange: ((Configuration)->Unit)? = null
 
     override fun didChangeConfiguration(params: DidChangeConfigurationParams) {
         val settings = params.settings as? JsonObject
-        settings?.get("kotlin")?.asJsonObject?.apply {
-            // Update deprecated configuration keys
-            get("debounceTime")?.asLong?.let {
-                config.lintDebounceTime = it
-                docService.updateDebouncer()
+        log.info("Updating configuration: ${settings}")
+        if(settings == null) return
+
+        settings.get("kotlin").apply {
+            fun g(vararg path: String) =
+                path.fold(this) { s, segment ->
+                    s?.asJsonObject?.get(segment)
+                }
+
+            /* // Update deprecated configuration keys */
+            /* g("debounceTime")?.asLong?.let { */
+            /*     config.lintDebounceTime = it */
+            /*     docService.updateDebouncer() */
+            /* } */
+            /* // Update linter options */
+            /* g("linting", "debounceTime")?.asLong?.also { */
+            /*     config.lintDebounceTime = it */
+            /*     docService.updateDebouncer() */
+            /* } */
+
+            g("snippetsEnabled")?.asBoolean?.let {
+                config.snippets = it
             }
-            get("snippetsEnabled")?.asBoolean?.let { config.snippets = it }
 
             // Update compiler options
-            get("compiler")?.asJsonObject?.apply {
-                get("jvm")?.asJsonObject?.apply {
-                    get("target")?.asString?.let {
-                        config.jvmTarget=it
-                        cp.updateCompilerConfiguration()
-                    }
-                }
-            }
-
-            // Update linter options
-            get("linting")?.asJsonObject?.apply {
-                get("debounceTime")?.asLong?.let {
-                    config.lintDebounceTime = it
-                    docService.updateDebouncer()
-                }
+            g("compiler", "jvm", "target")?.asString?.also {
+                config.jvmTarget=it
             }
 
             // Update code-completion options
-            get("completion")?.asJsonObject?.apply {
-                get("snippets")?.asJsonObject?.apply {
-                    get("enabled")?.asBoolean?.let { config.snippets = it }
-                }
+            g("completion", "snipptes", "enabled")?.asBoolean?.also {
+                config.snippets = it
             }
 
             // Update indexing options
-            get("indexing")?.asJsonObject?.apply {
-                get("enabled")?.asBoolean?.let {
-                    config.indexEnabled = it
-                }
+            g("indexing", "enabled")?.asBoolean?.also {
+                config.indexEnabled = it
             }
 
-            // Update options about external sources e.g. JAR files, decompilers, etc
-            get("externalSources")?.asJsonObject?.apply {
-                get("useKlsScheme")?.asBoolean?.let { config.useKlsScheme = it }
-                get("autoConvertToKotlin")?.asBoolean?.let { config.autoConvertToKotlin = it }
+            g("externalSources", "autoConvertToKotlin")?.asBoolean?.also {
+                config.autoConvertToKotlin = it
             }
         }
-
-        log.info("Updated configuration: ${settings}")
+        onConfigChange?.invoke(config)
     }
 
-    /* @Suppress("DEPRECATION") */
-    /* override fun symbol(params: WorkspaceSymbolParams): CompletableFuture<Either<List<SymbolInformation>, List<WorkspaceSymbol>>> { */
-    /*     val result = workspaceSymbols(params.query, sp) */
-
-    /*     return CompletableFuture.completedFuture(Either.forRight(result)) */
-    /* } */
 
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
-        for (change in params.event.added) {
-            log.info("Adding workspace ${change.uri} to source path")
-
-            val root = Paths.get(parseURI(change.uri))
-
-            sf.addWorkspaceRoot(root)
-            val refreshed = cp.addWorkspaceRoot(root)
-            if (refreshed) {
-                sp.refresh()
+        params.event.added
+            .map {parseURI(it.uri)}
+            .forEach{
+                log.info("Adding workspace ${it} to source path")
+                addWorkspaceRoot(it)
             }
-        }
-        for (change in params.event.removed) {
-            log.info("Dropping workspace ${change.uri} from source path")
-
-            val root = Paths.get(parseURI(change.uri))
-
-            sf.removeWorkspaceRoot(root)
-            val refreshed = cp.removeWorkspaceRoot(root)
-            if (refreshed) {
-                sp.refresh()
+        params.event.removed
+            .map {parseURI(it.uri)}
+            .forEach {
+                log.info("Dropping workspace ${it} from source path")
+                removeWorkspaceRoot(it)
             }
-        }
+    }
+
+    fun createdOnDisk(uri: URI) {
+        sp.readFromProvider(uri)
+        cp.createdOnDisk(uri)
+    }
+
+    fun deletedOnDisk(uri: URI) {
+        sp.remove(uri)
+        cp.deletedOnDisk(uri)
+    }
+
+    fun changedOnDisk(uri: URI) {
+        sp.readFromProvider(uri)
+        cp.changedOnDisk(uri)
+    }
+
+    fun addWorkspaceRoot(root: URI) {
+        cp.allKotlinFiles().forEach { sp.readFromProvider(it) }
+        cp.addWorkspaceRoot(root)
+    }
+
+    fun removeWorkspaceRoot(root: URI) {
+        sp.removeMatching{ it.toPath().startsWith(root.toPath()) }
+        cp.removeWorkspaceRoot(root)
     }
 }

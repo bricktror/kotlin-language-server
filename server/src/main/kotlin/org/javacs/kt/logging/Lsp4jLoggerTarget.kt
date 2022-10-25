@@ -16,7 +16,7 @@ class Lsp4jLoggerTarget(
                 Level.INFO -> MessageType.Info
                 else -> MessageType.Log
             }
-            message = record.message
+            message = "${record.loggerName}: ${record.message}"
         })
 }
 
