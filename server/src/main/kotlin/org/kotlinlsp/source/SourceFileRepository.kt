@@ -81,7 +81,7 @@ class SourceFileRepository(
 
 
         fun <T: SourceFile> updateAll(updater: (SourceFile) -> T?): Collection<T> =
-            inner.keys.mapNotNull { files.update(it) { it?.let{ updater(it) } } }
+            inner.keys.toList().mapNotNull { files.update(it) { it?.let{ updater(it) } } }
 
         fun <T: SourceFile> updateAll(uris: Collection<URI>, updater: (SourceFile) -> T?): Collection<T> =
             uris.mapNotNull { files.update(it) { it?.let{ updater(it) } } }
