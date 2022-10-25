@@ -7,7 +7,7 @@ plugins {
 
 application {
     applicationName="kotlin-language-server"
-    mainClass.set("org.javacs.kt.MainKt")
+    mainClass.set("org.kotlinlsp.MainKt")
     applicationDefaultJvmArgs = listOf("-DkotlinLanguageServer.version=${Versions.project}")
 }
 
