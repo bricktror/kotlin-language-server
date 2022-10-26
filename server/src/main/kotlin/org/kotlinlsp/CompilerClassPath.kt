@@ -46,7 +46,7 @@ class CompilerClassPath(
                 inner = CompositeURIWalker(innerWorkspaceRoots.values))
 
     fun createCompiler(): Pair<Compiler, Compiler> =
-        resolveClasspath(innerWorkspaceRoots.values)
+        resolveClasspath(innerWorkspaceRoots.values.map{it.root})
             .let { (classpath, buildClasspath)->
                 fun init(classpath: Set<Path>) =
                     CompilerImpl(
