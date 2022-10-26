@@ -9,5 +9,4 @@ rootProject.name = "kotlin-language-server"
 
 include(
     "server",
-    /* "grammars" */
 )
