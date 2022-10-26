@@ -115,7 +115,6 @@ class KotlinWorkspaceService(
         onConfigChange?.invoke(config)
     }
 
-
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
         params.event.added
             .map {parseURI(it.uri)}
@@ -147,8 +146,8 @@ class KotlinWorkspaceService(
     }
 
     fun addWorkspaceRoot(root: URI) {
-        cp.allKotlinFiles().forEach { sp.readFromProvider(it) }
         cp.addWorkspaceRoot(root)
+            .forEach { sp.readFromProvider(it) }
     }
 
     fun removeWorkspaceRoot(root: URI) {

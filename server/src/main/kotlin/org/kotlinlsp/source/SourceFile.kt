@@ -25,6 +25,7 @@ import org.kotlinlsp.util.arrow.*
 import org.kotlinlsp.util.describeURI
 import org.kotlinlsp.util.fileExtension
 import org.kotlinlsp.util.filePath
+import org.kotlinlsp.logging.findLogger
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.descriptors.PackageViewDescriptor
@@ -53,15 +54,19 @@ abstract class SourceFile {
             content=parent.content,
             isTransient=parent.isTransient,
         ) {}
+        private val log by findLogger
 
         val kind get()= if (path.fileName.toString().endsWith(".gradle.kts"))
                 CompilationKind.BUILD_SCRIPT
             else
                 CompilationKind.DEFAULT
-        val isScript: Boolean get()= path.getFileName().endsWith(".kt")
 
-        fun parse(compiler: Compiler) =
-            Parsed(this, compiler.createKtFile(content, path, kind), compiler)
+        val isScript: Boolean get()= path.getFileName().endsWith(".kts")
+
+        fun parse(compiler: Compiler): Parsed{
+            log.fine("Parsing file ${path}")
+            return Parsed(this, compiler.createKtFile(content, path), compiler)
+        }
 
         override fun forceInvalidate() =
             RawSource(this)
@@ -73,15 +78,18 @@ abstract class SourceFile {
         protected val compiler: Compiler,
     ): RawSource(parent) {
         constructor(parent: Parsed): this(parent, parent.ktFile, parent.compiler) { }
+        private val log by findLogger
 
         fun compile(
             dependencies: Collection<KtFile>,
         ): Compiled {
+            log.fine("Compiling ${path} with ${dependencies.size} dependencies.")
             var sourcePath = dependencies.let {
+                // TODO does it need itself as sourcepath really?
                 if (isTransient) it+listOf(ktFile)
                 else it
             }
-            val (context, module) = compiler.compileKtFile(ktFile, sourcePath, kind)
+            val (context, module) = compiler.compileKtFile(ktFile, sourcePath)
             return Compiled(this, module, context, sourcePath)
         }
     }
@@ -92,6 +100,7 @@ abstract class SourceFile {
         val context: BindingContext,
         val sourcePath: Collection<KtFile>
     ): Parsed(parent) {
+        private val log by findLogger
         val isIndexed get() = cleanupIndex!=null
 
         private var cleanupGenerated: Closeable? = null
@@ -106,6 +115,7 @@ abstract class SourceFile {
         }
 
         fun indexSymbols(updateIndex: ((SymbolTransaction.()->Unit)->Unit)) {
+            log.fine("Adding symbols from ${path} to index")
             cleanupIndex?.close()
             cleanupIndex = module
                 .getPackage(ktFile.packageFqName)
@@ -120,6 +130,7 @@ abstract class SourceFile {
                     }
                     object : Closeable {
                         override fun close() {
+                            log.fine("Removing symbols from ${path} to index")
                             updateIndex {
                                 it.forEach {
                                     remove(it.fqName.asString(), it.extensionReceiverType?.asString())
@@ -132,10 +143,10 @@ abstract class SourceFile {
 
         fun generateCode() {
             cleanupGenerated?.close()
-            cleanupGenerated= compiler.generateCode(module, context, listOf(ktFile))
+            cleanupGenerated= compiler.generateCode(module, context, ktFile)
         }
 
         fun asCompiledFile()=
-            CompiledFile(content, ktFile, context, module, sourcePath, compiler, isScript, kind)
+            CompiledFile(content, ktFile, context, module, sourcePath, compiler, isScript)
     }
 }

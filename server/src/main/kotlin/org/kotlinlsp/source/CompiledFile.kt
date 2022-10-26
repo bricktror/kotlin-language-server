@@ -32,7 +32,6 @@ class CompiledFile(
     private val sourcePath: Collection<KtFile>,
     private val compiler: Compiler,
     private val isScript: Boolean = false,
-    private val kind: CompilationKind = CompilationKind.DEFAULT
 ) {
     private val log by findLogger
     /**
@@ -46,17 +45,19 @@ class CompiledFile(
     }
 
     fun typeOfExpression(expression: KtExpression, scopeWithImports: LexicalScope): KotlinType? =
-            bindingContextOf(expression, scopeWithImports).getType(expression)
+        bindingContextOf(expression, scopeWithImports).getType(expression)
 
     fun bindingContextOf(expression: KtExpression, scopeWithImports: LexicalScope): BindingContext =
-            compiler.compileKtExpression(expression, scopeWithImports, sourcePath, kind).first
+        compiler.compileKtExpression(expression, scopeWithImports, sourcePath).first
 
     private fun expandForType(cursor: Int, surroundingExpr: KtExpression): KtExpression {
         val dotParent = surroundingExpr.parent as? KtDotQualifiedExpression
-        if (dotParent != null && dotParent.selectorExpression?.textRange?.contains(cursor) ?: false) {
+            ?: return surroundingExpr
+        dotParent.selectorExpression?.textRange?.let {
+            if(it.contains(cursor))
             return expandForType(cursor, dotParent)
         }
-        else return surroundingExpr
+        return surroundingExpr
     }
 
     /**
@@ -121,7 +122,7 @@ class CompiledFile(
 
         val (surroundingContent, offset) = contentAndOffsetFromElement(psi, oldParent, asReference)
         val padOffset = " ".repeat(offset)
-        val recompile = compiler.createKtFile(padOffset + surroundingContent, Paths.get("dummy.virtual" + if (isScript) ".kts" else ".kt"), kind)
+        val recompile = compiler.createKtFile(padOffset + surroundingContent, Paths.get("dummy.virtual" + if (isScript) ".kts" else ".kt"))
         return recompile.findElementAt(cursor)?.findParent<KtElement>()
     }
 

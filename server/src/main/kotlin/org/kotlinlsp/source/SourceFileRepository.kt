@@ -38,7 +38,7 @@ import org.jetbrains.kotlin.resolve.scopes.DescriptorKindFilter
 
 // TODO thread safety? Make suspendable functions using worker thread?
 class SourceFileRepository(
-    private val compiler: Compiler,
+    private val compiler: (CompilationKind)->Compiler,
     private val contentProvider: FileContentProvider,
     val index : SymbolIndex,
 ) {
@@ -47,7 +47,7 @@ class SourceFileRepository(
     private object files {
         private val log by findLogger
 
-        private val inner= mutableMapOf<URI, SourceFile>()
+        private val inner = mutableMapOf<URI, SourceFile>()
         val keys get() = inner.keys
         operator fun get(uri: URI) = inner[uri.normalize()]
 
@@ -96,10 +96,10 @@ class SourceFileRepository(
             }
         }
 
-        fun isParsed(compiler: Compiler): (SourceFile)-> SourceFile.Parsed = {
+        fun isParsed(compiler: (CompilationKind)->Compiler): (SourceFile)-> SourceFile.Parsed = {
             when(it) {
                 is SourceFile.Parsed -> it
-                is SourceFile.RawSource -> it.parse(compiler)
+                is SourceFile.RawSource -> it.parse(compiler(it.kind))
                 else -> throw Error("Unhandled SourceFile type ${it}")
             }
         }
@@ -181,12 +181,6 @@ class SourceFileRepository(
     fun content(uri: URI): String =
         files.update(uri) { ensure.isRaw(it ?: rawSource(uri)) }!!.content
 
-    /** Compile the latest version of a file */
-    fun currentVersion(uri: URI): CompiledFile? =
-        files[uri]
-            ?.let{ it as? SourceFile.Compiled }
-            ?.asCompiledFile()
-
     /** Compile changed files */
     fun compileFiles(uris: Collection<URI>) =
             files.updateAll(ensure.isParsed(compiler))
@@ -203,7 +197,6 @@ class SourceFileRepository(
         compileAllFiles()
             .forEach { it.indexSymbols(index::updateIndex) }
     }
-
 
     fun compileAllFiles() =
         files.updateAll(ensure.isParsed(compiler))

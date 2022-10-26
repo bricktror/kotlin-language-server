@@ -46,13 +46,13 @@ fun findReferences(declaration: KtNamedDeclaration, sp: SourceFileRepository): L
 }
 
 private fun doFindReferences(file: Path, cursor: Int, sp: SourceFileRepository): Collection<KtElement> {
-    val recover = sp.currentVersion(file.toUri())!!
+    val recover = sp.compileFile(file.toUri()).asCompiledFile()
     val element = recover.elementAtPoint(cursor)?.findParent<KtNamedDeclaration>() ?: return emptyResult("No declaration at ${recover.describePosition(cursor)}")
     return doFindReferences(element, sp)
 }
 
 private fun doFindReferences(element: KtNamedDeclaration, sp: SourceFileRepository): Collection<KtElement> {
-    val declaration = sp.currentVersion(element.containingFile.toPath().toUri())!!
+    val declaration = sp.compileFile(element.containingFile.toPath().toUri()).asCompiledFile()
         .compile[BindingContext.DECLARATION_TO_DESCRIPTOR, element]
         ?: return emptyResult("Declaration ${element.fqName} has no descriptor")
     val recompile = possibleReferences(declaration, sp)

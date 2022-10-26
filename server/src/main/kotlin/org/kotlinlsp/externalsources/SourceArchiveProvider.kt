@@ -26,11 +26,6 @@ class CompositeSourceArchiveProvider(
         providers.firstNotNullOfOrNull { it.fetchSourceArchive(compiledArchive) }
 }
 
-class ClassPathSourceArchiveProvider(private val cp: CompilerClassPath) : SourceArchiveProvider {
-    override fun fetchSourceArchive(compiledArchive: Path): Path? =
-            cp.classPath.firstOrNull { it.compiledJar == compiledArchive }?.sourceJar
-}
-
 class JdkSourceArchiveProvider(private val javaHome: String) : SourceArchiveProvider {
 
     /**

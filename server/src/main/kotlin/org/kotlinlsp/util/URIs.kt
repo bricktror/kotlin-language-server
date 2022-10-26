@@ -34,11 +34,10 @@ val URI.queryMap:Map<String, String> get()=
 /** Fetches the file extension WITHOUT the dot. */
 val URI.fileExtension: String?
     get() {
-        val str = toString()
-        val dotOffset = str.lastIndexOf(".")
-        val queryStart = str.indexOf("?")
-        val end = if (queryStart != -1) queryStart else str.length
-        return if (dotOffset < 0) null else str.substring(dotOffset + 1, end)
+        return getPath().split(".")
+            .takeIf{it.size > 1}
+            ?.takeLast(1)
+            ?.first()
     }
 
 @Deprecated("")

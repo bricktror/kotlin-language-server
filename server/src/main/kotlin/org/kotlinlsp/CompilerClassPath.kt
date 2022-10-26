@@ -6,15 +6,20 @@ import java.net.URI
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.PathMatcher
 import kotlin.coroutines.*
+import kotlin.io.path.toPath
 import kotlinx.coroutines.*
-import org.kotlinlsp.classpath.ClassPathEntry
-import org.kotlinlsp.classpath.defaultClassPathResolver
-import org.kotlinlsp.Compiler
+import org.kotlinlsp.resolveClasspath
 import org.kotlinlsp.logging.*
+import org.kotlinlsp.source.CompositeURIWalker
+import org.kotlinlsp.source.DirectoryIgnoringURIWalker
+import org.kotlinlsp.source.FilesystemURIWalker
+import org.kotlinlsp.source.URIWalker
 import org.kotlinlsp.util.TempFile
 import org.kotlinlsp.util.TemporaryDirectory
 import org.kotlinlsp.util.filePath
+import org.kotlinlsp.util.fileExtension
 
 /**
  * Manages the class path (compiled JARs, etc), the Java source path
@@ -25,158 +30,77 @@ class CompilerClassPath(
     val outputDirectory: TemporaryDirectory,
 ) {
     private val log by findLogger
-    val workspaceRoots = mutableSetOf<URI>()
 
-    private val javaSourcePath = mutableSetOf<Path>()
-    private val buildScriptClassPath = mutableSetOf<ClassPathEntry>()
-    val classPath = mutableSetOf<ClassPathEntry>()
+    private val innerWorkspaceRoots = mutableMapOf<URI, FilesystemURIWalker>()
+    val workspaceRoots get()= innerWorkspaceRoots.keys.toSet()
+    private val javaSourcePath get()= uriWalker
+        .walk()
+        .filter{it.fileExtension == "java"}
+        .map{it.toPath()}
+        .toSet()
 
-    val javaHome: String? = System.getProperty("java.home", null)
+    private val uriWalker get()=
+        DirectoryIgnoringURIWalker(
+                // TODO read gitignore for each path
+                ignoredDirectories=listOf(".*", "bin", "build", "node_modules", "target"),
+                inner = CompositeURIWalker(innerWorkspaceRoots.values))
 
-    fun createCompiler() =
-        Compiler(
-            javaSourcePath,
-            classPath.map { it.compiledJar }.toSet(),
-            buildScriptClassPath.mapNotNull{it.compiledJar}.toSet(),
-            outputDirectory.file,
-            config.jvmTarget)
-
-    var onNewCompiler: ((Compiler)->Unit)?=null
-
-    /** Updates and possibly reinstantiates the compiler using new paths. */
-    private fun refresh(
-        updateClassPath: Boolean = true,
-        updateBuildScriptClassPath: Boolean = true,
-        updateJavaSourcePath: Boolean = true
-    ) {
-        var refreshCompiler = updateJavaSourcePath
-        // TODO: Fetch class path and build script class path concurrently (and asynchronously)
-        val resolver = defaultClassPathResolver(workspaceRoots.mapNotNull{it.filePath})
-
-        if (updateClassPath) {
-            if(syncPaths(classPath, resolver.classpath)) {
-                refreshCompiler = true
+    fun createCompiler(): Pair<Compiler, Compiler> =
+        resolveClasspath(innerWorkspaceRoots.values)
+            .let { (classpath, buildClasspath)->
+                fun init(classpath: Set<Path>) =
+                    CompilerImpl(
+                        javaSourcePath,
+                        classpath,
+                        outputDirectory.file,
+                        config.jvmTarget)
+                init(classpath) to init(buildClasspath)
             }
-        }
 
-        if (updateBuildScriptClassPath) {
-            log.info("Update build script path")
-            if (syncPaths(buildScriptClassPath, resolver.buildScriptClasspath)) {
-                refreshCompiler = true
+    var onNewCompiler: ((Pair<Compiler, Compiler>)->Unit)?=null
+
+    fun addWorkspaceRoot(root: URI): Sequence<URI> {
+        log.info("Adding workspace root ${root}")
+        val workspaceWalker= root.filePath
+            ?.let(::FilesystemURIWalker)
+            ?: run {
+                log.warning("Unable to walk root ${root}. Ignored")
+                return emptySequence()
             }
-        }
-        if (!refreshCompiler) return
-        onNewCompiler?.invoke(createCompiler())
-    }
-
-    private fun  syncPaths(dest: MutableSet<ClassPathEntry>, new: Set<ClassPathEntry>): Boolean {
-        if(dest==new) return false
-        val added = new - dest
-        val removed = dest - new
-        synchronized(dest) {
-            dest.removeAll(removed)
-            dest.addAll(added)
-        }
-        return true;
-    }
-
-    fun addWorkspaceRoot(root: URI) {
-        log.info("Searching for dependencies and Java sources in workspace root ${root}")
-        workspaceRoots.add(root)
-        javaSourcePath.addAll(findJavaSourceFiles(root))
-        refresh()
+        innerWorkspaceRoots[root]=workspaceWalker
+        invalidateCompiler()
+        return workspaceWalker
+            .walk()
+            .map{ it.toPath() }
+            .filter { it.fileName.run { endsWith(".kt") || endsWith(".kts") }}
+            .map { it.toUri() }
     }
 
     fun removeWorkspaceRoot(root: URI) {
-        log.info("Removing dependencies and Java source path from workspace root ${root}")
-        workspaceRoots.remove(root)
-        javaSourcePath.removeAll(findJavaSourceFiles(root))
-        refresh()
-    }
-
-    fun createdOnDisk(uri: URI) {
-        if (!exclusions.isURIIncluded(uri)) return
-        uri.filePath?.also{file->
-            if (isJavaSource(file)) {
-                javaSourcePath.add(file)
-            }
+        log.info("Removing workspace root ${root}")
+        innerWorkspaceRoots.remove(root) ?: run {
+            log.warning("Root ${root} is not tracked. Unable to remove.")
+            return
         }
-        changedOnDisk(uri)
+        invalidateCompiler()
     }
 
-    fun deletedOnDisk(uri: URI) {
-        if (!exclusions.isURIIncluded(uri)) return
-        uri.filePath?.also{file->
-            if (isJavaSource(file)) {
-                javaSourcePath.remove(file)
-            }
-        }
-        changedOnDisk(uri)
-    }
-
+    fun createdOnDisk(uri: URI) = changedOnDisk(uri)
+    fun deletedOnDisk(uri: URI) = changedOnDisk(uri)
     fun changedOnDisk(uri: URI) {
-        if (!exclusions.isURIIncluded(uri)) return
-        val buildScript = isBuildScript(uri)
-        val javaSource = uri.filePath?.let(::isJavaSource) ?: false
-        if (!buildScript && !javaSource) return
-        refresh(
-            updateClassPath = buildScript,
-            updateBuildScriptClassPath = false,
-            updateJavaSourcePath = javaSource)
-    }
-
-    private fun isJavaSource(file: Path): Boolean = file.fileName.endsWith(".java")
-
-    private fun isBuildScript(uri: URI): Boolean = File(uri.getPath()).getName().let {
-        it == "pom.xml" || it == "build.gradle" || it == "build.gradle.kts"
-    }
-
-    private fun findJavaSourceFiles(root: URI): Set<Path> {
-        val sourceMatcher = FileSystems.getDefault().getPathMatcher("glob:*.java")
-        return SourceExclusions(listOfNotNull(root.filePath))
-            .walkIncluded()
-            .filter { sourceMatcher.matches(it.fileName) }
-            .toSet()
-    }
-    private val exclusions get()= SourceExclusions(workspaceRoots.mapNotNull{it.filePath})
-
-    fun allKotlinFiles()=
-        exclusions
-            .walkIncluded()
-            .filter { it.fileName.run { endsWith(".kt") || endsWith(".kts") }}
-            .map { it.toUri() }
-            .toSet()
-}
-
-// TODO: Read exclusions from gitignore/settings.json/... instead of
-// hardcoding them
-// TODO: Rename? ClassPathWalker?
-private class SourceExclusions(
-    private val workspaceRoots: Collection<Path>
-) {
-    private val excludedPatterns = listOf(".*", "bin", "build", "node_modules", "target")
-        .map { FileSystems.getDefault().getPathMatcher("glob:$it") }
-    /** Finds all non-excluded files recursively. */
-    fun walkIncluded(): Sequence<Path> =
-        workspaceRoots
-            .asSequence()
-            .flatMap { root ->
-                root.toFile()
-                    .walk()
-                    .onEnter { isPathIncluded(it.toPath()) }
-                    .map { it.toPath() }
-    }
-
-    /** Tests whether the given URI is not excluded. */
-    fun isURIIncluded(uri: URI) = uri.filePath?.let(this::isPathIncluded) ?: false
-
-    /** Tests whether the given path is not excluded. */
-    fun isPathIncluded(file: Path): Boolean =
-        workspaceRoots.any { file.startsWith(it) }
-        && excludedPatterns.none { pattern ->
-            workspaceRoots
-                .mapNotNull { if (file.startsWith(it)) it.relativize(file) else null }
-                .flatMap { it } // Extract path segments
-                .any(pattern::matches)
+        if (!uriWalker.contains(uri)) return
+        fun isBuildScript(uri: URI): Boolean = File(uri.getPath()).getName().let {
+            it == "pom.xml" || it.endsWith(".gradle") || it.endsWith(".gradle.kts")
         }
+        fun isJavaSource(file: Path): Boolean = file.fileName.endsWith(".java")
+        val updateClassPath = isBuildScript(uri)
+        val updateJavaSourcePath = uri.filePath?.let(::isJavaSource) ?: false
+        if(!updateClassPath && !updateJavaSourcePath) return
+        invalidateCompiler()
+    }
+
+    /** Updates and possibly reinstantiates the compiler using new paths. */
+    private fun invalidateCompiler() {
+        onNewCompiler?.invoke(createCompiler())
+    }
 }

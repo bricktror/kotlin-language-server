@@ -17,7 +17,6 @@ import org.eclipse.lsp4j.services.LanguageClientAware
 import org.eclipse.lsp4j.services.NotebookDocumentService
 import org.eclipse.lsp4j.services.TextDocumentService as JavaTextDocumentService
 import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
-import org.kotlinlsp.Compiler
 import org.kotlinlsp.externalsources.*
 import org.kotlinlsp.index.SymbolIndex
 import org.kotlinlsp.logging.*
@@ -36,7 +35,12 @@ class KotlinLanguageServer(
     private val compilerTmpDir = TempFile.createDirectory()
     private val classPath = CompilerClassPath(config, compilerTmpDir)
 
-    private var compiler = classPath.createCompiler()
+    private var compilers = classPath.createCompiler()
+    private fun resolveCompiler(kind: CompilationKind) =
+        if (kind==CompilationKind.DEFAULT)
+            compilers.first
+        else
+            compilers.second
 
     private val tempDirectory = TemporaryDirectory()
 
@@ -46,7 +50,7 @@ class KotlinLanguageServer(
     ))
 
     private val sourceFileRepository = SourceFileRepository(
-            compiler,
+            {resolveCompiler(it)},
             contentProvider,
             SymbolIndex())
 
@@ -68,7 +72,7 @@ class KotlinLanguageServer(
             .content(parseURI(fileUri))
             .let{extractRange(it, range)}
             // Apply the conversion
-            .let{compiler.transpileJavaToKotlin(it)}
+            .let{compilers.first.transpileJavaToKotlin(it)}
             // Wrap as an text-document edit
             .let{listOf(TextEdit(range, it))}
             .let{TextDocumentEdit(
@@ -94,9 +98,7 @@ class KotlinLanguageServer(
 
     override val extensions = KotlinProtocolExtensionService(
         contentProvider,
-        classPath,
-        sourceFileRepository,
-        scope)
+        sourceFileRepository)
 
     private var client: LanguageClient? = null
 
@@ -112,11 +114,19 @@ class KotlinLanguageServer(
     init {
         classPath.onNewCompiler={
             log.info("Reinstantiating compiler")
-            compiler=it
+            compilers.let{(a,b)->
+                a.close()
+                b.close()
+            }
+            compilers=it
             sourceFileRepository.refresh()
         }
         workspaceService.onConfigChange={
-            compiler=classPath.createCompiler()
+            compilers.let{(a,b)->
+                a.close()
+                b.close()
+            }
+            compilers=classPath.createCompiler()
         }
     }
 
@@ -184,7 +194,8 @@ class KotlinLanguageServer(
 
     override fun close() {
         textDocumentService.close()
-        compiler.close()
+        compilers.first.close()
+        compilers.second.close()
         tempDirectory.close()
         compilerTmpDir.close()
     }

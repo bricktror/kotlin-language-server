@@ -14,36 +14,19 @@ import kotlinx.coroutines.future.asCompletableFuture
 
 class KotlinProtocolExtensionService(
     private val contentProvider: FileContentProvider,
-    private val cp: CompilerClassPath,
     private val sp: SourceFileRepository,
-    private val scope: CoroutineScope,
 ) : ProtocolExtensions {
 
     override suspend fun jarClassContents(textDocument: TextDocumentIdentifier) =
         contentProvider.read(parseURI(textDocument.uri))
 
-    override suspend fun buildOutputLocation() = cp.outputDirectory.file.absolutePath
-
-    override suspend fun mainClass(textDocument: TextDocumentIdentifier): Map<String, Any?> {
-        val fileUri = parseURI(textDocument.uri)
-
-        // we find the longest one in case both the root and submodule are included
-        val workspacePath = cp.workspaceRoots.filter {
-            fileUri.toPath().startsWith(it.toPath())
-        }.map {
-            it.toString()
-        }.maxByOrNull(String::length) ?: ""
-
-        val compiledFile = sp.currentVersion(fileUri)!!
-
-        return resolveMain(compiledFile) + mapOf("projectRoot" to workspacePath)
-    }
-
     override suspend fun overrideMember(position: TextDocumentPositionParams): List<CodeAction> {
-        val fileUri = parseURI(position.textDocument.uri)
-        val compiledFile = sp.currentVersion(fileUri)!!
-        val cursorOffset = offset(compiledFile.content, position.position)
-
-        return listOverridableMembers(compiledFile, cursorOffset)
+        val compiledFile = sp
+            .compileFile(parseURI(position.textDocument.uri))
+            .asCompiledFile()
+        return listOverridableMembers(
+            compiledFile,
+            offset(compiledFile.content, position.position)
+        )
     }
 }

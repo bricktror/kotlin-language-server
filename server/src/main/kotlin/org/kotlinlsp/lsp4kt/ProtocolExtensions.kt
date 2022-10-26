@@ -10,8 +10,6 @@ import java.util.concurrent.CompletableFuture
 
 interface ProtocolExtensions {
     suspend fun jarClassContents(textDocument: TextDocumentIdentifier): String?
-    suspend fun buildOutputLocation(): String?
-    suspend fun mainClass(textDocument: TextDocumentIdentifier): Map<String, Any?>
     suspend fun overrideMember(position: TextDocumentPositionParams): List<CodeAction>
 }
 
@@ -19,12 +17,6 @@ interface ProtocolExtensions {
 interface JavaProtocolExtensions {
     @JsonRequest
     fun jarClassContents(textDocument: TextDocumentIdentifier): CompletableFuture<String?>
-
-    @JsonRequest
-    fun buildOutputLocation(): CompletableFuture<String?>
-
-    @JsonRequest
-    fun mainClass(textDocument: TextDocumentIdentifier): CompletableFuture<Map<String, Any?>>
 
     @JsonRequest
     fun overrideMember(position: TextDocumentPositionParams): CompletableFuture<List<CodeAction>>
@@ -43,14 +35,6 @@ private class JavaProtocolExtensionsFacade(
 
     override fun jarClassContents(textDocument: TextDocumentIdentifier) = launch {
         service.jarClassContents(textDocument)
-    }
-
-    override fun buildOutputLocation() = launch {
-        service.buildOutputLocation()
-    }
-
-    override fun mainClass(textDocument: TextDocumentIdentifier) = launch {
-        service.mainClass(textDocument)
     }
 
     override fun overrideMember(position: TextDocumentPositionParams) = launch {

@@ -179,7 +179,7 @@ class KotlinTextDocumentService(
 
     override suspend fun semanticTokensFull(params: SemanticTokensParams): SemanticTokens {
         log.info{"Full semantic tokens in ${params.textDocument.uri}"}
-        val file = sp.currentVersion(parseURI(params.textDocument.uri))!!
+        val file = sp.compileFile(parseURI(params.textDocument.uri)).asCompiledFile()
         val tokens = encodedSemanticTokens(file)
         log.info("Found ${tokens.size} tokens")
         return SemanticTokens(tokens)
@@ -188,7 +188,7 @@ class KotlinTextDocumentService(
     override suspend fun semanticTokensRange(params: SemanticTokensRangeParams): SemanticTokens {
         log.info{"Ranged semantic tokens in ${params.textDocument.uri}"}
 
-        val file = sp.currentVersion(parseURI(params.textDocument.uri))!!
+        val file = sp.compileFile(parseURI(params.textDocument.uri)).asCompiledFile()
 
         val tokens = encodedSemanticTokens(file, params.range)
         log.info("Found ${tokens.size} tokens")
