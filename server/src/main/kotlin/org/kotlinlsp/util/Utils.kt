@@ -10,7 +10,7 @@ import java.io.InputStream
 
 private val log by findLogger.atToplevel(object{})
 
-fun execAndReadStdoutAndStderr(shellCommand: List<String>, directory: Path): Pair<String, String>
+fun execAndReadStdoutAndStderr(directory: Path, shellCommand: List<String>): Pair<String, String>
     = ProcessBuilder(shellCommand)
     .directory(directory.toFile())
     .start()
