@@ -17,88 +17,17 @@ import org.eclipse.lsp4j.services.LanguageClientAware
 import org.eclipse.lsp4j.services.NotebookDocumentService
 import org.eclipse.lsp4j.services.TextDocumentService as JavaTextDocumentService
 import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
-import org.kotlinlsp.externalsources.*
 import org.kotlinlsp.index.SymbolIndex
 import org.kotlinlsp.logging.*
 import org.kotlinlsp.lsp4kt.*
 import org.kotlinlsp.semanticTokensLegend
+import org.kotlinlsp.file.*
 import org.kotlinlsp.source.*
-import org.kotlinlsp.util.TempFile
-import org.kotlinlsp.util.TemporaryDirectory
+import org.kotlinlsp.file.TemporaryDirectory
 import org.kotlinlsp.util.parseURI
 import org.kotlinlsp.util.extractRange
 
 class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
-    private val compilerTmpDir = TempFile.createDirectory()
-    private val classPath = CompilerClassPath(
-        "default",
-        compilerTmpDir)
-
-    private var compilers = classPath.createCompiler()
-    private fun resolveCompiler(kind: CompilationKind) =
-        if (kind==CompilationKind.DEFAULT)
-            compilers.first
-        else
-            compilers.second
-
-    private val tempDirectory = TemporaryDirectory()
-
-    private val contentProvider = SchemeDelegatingFileContentProvider(mapOf(
-        "file" to localFileSystemContentProvider,
-        "kls" to ClassContentProvider(),
-    ))
-
-    private val sourceFileRepository = SourceFileRepository(
-            {resolveCompiler(it)},
-            contentProvider,
-            SymbolIndex())
-
-    override val textDocumentService = KotlinTextDocumentService(
-        sourceFileRepository,
-        tempDirectory,
-        contentProvider,
-        classPath)
-
-    private val workspaceActions = mapOf<String, (List<Any>)->Any?>(
-        "convertJavaToKotlin" to { args ->
-            val gson = Gson()
-            val fileUri = (args[0] as JsonElement).asString
-            val range = gson.fromJson(args[1] as JsonElement, Range::class.java)
-
-            sourceFileRepository
-            //Get the segment that should be converted
-            .content(parseURI(fileUri))
-            .let { range.extractRange(it) }
-            // Apply the conversion
-            .let{compilers.first.transpileJavaToKotlin(it)}
-            // Wrap as an text-document edit
-            .let{listOf(TextEdit(range, it))}
-            .let{TextDocumentEdit(
-                    // TODO more arguments to the identitifer?
-                    VersionedTextDocumentIdentifier().apply { uri = fileUri },
-                    it)
-            }
-            // Wrap as an workspace edit
-            .let{listOf(Either.forLeft<TextDocumentEdit, ResourceOperation>( it))}
-            .let{WorkspaceEdit(it)}
-            // Apply the edit to the client
-            .let{ApplyWorkspaceEditParams(it)}
-            .also{client?.applyEdit(it)}
-        },
-    )
-
-    override val workspaceService = KotlinWorkspaceService(
-        sourceFileRepository,
-        classPath,
-        textDocumentService,
-        workspaceActions)
-
-    override val extensions = KotlinProtocolExtensionService(
-        contentProvider,
-        sourceFileRepository)
-
-    private var client: LanguageClient? = null
-
     companion object {
         private val log by findLogger
 
@@ -108,21 +37,75 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
         }
     }
 
-    init {
-        classPath.onNewCompiler={
-            log.info("Reinstantiating compiler")
-            compilers.let{(a,b)->
-                a.close()
-                b.close()
-            }
-            compilers=it
-            sourceFileRepository.refresh()
-        }
+    private val fileProvider: FileProvider = BootstrappingFileProvider {
+        SchemeDelegatingFileProvider(mapOf(
+            "file" to localFileSystemProvider,
+            "kls" to ZipFileProvider(it),
+            "kls.resource" to ResourceFileProvider(),
+        ))
     }
+
+    private val sourceFileRepository = SourceFileRepository(
+            {resolveCompiler(it)},
+            fileProvider,
+            SymbolIndex())
+
+    private val gson = Gson()
+    private val workspaceActions = mapOf<String, (List<Any>)->Any?>(
+        "convertJavaToKotlin" to { args ->
+            val fileUri = gson.fromJson((args[0] as JsonElement), String::class.java)
+            val range = gson.fromJson(args[1] as JsonElement, Range::class.java)
+
+            sourceFileRepository
+                //Get the segment that should be converted
+                .content(parseURI(fileUri))
+                .let { range.extractRange(it) }
+                // Apply the conversion
+                .let{resolveCompiler(CompilationKind.DEFAULT).transpileJavaToKotlin(it)}
+                // Wrap as an text-document edit
+                .let{listOf(TextEdit(range, it))}
+                .let{TextDocumentEdit(
+                        // TODO more arguments to the identitifer?
+                        VersionedTextDocumentIdentifier().apply { uri = fileUri },
+                        it)
+                }
+                // Wrap as an workspace edit
+                .let{listOf(Either.forLeft<TextDocumentEdit, ResourceOperation>( it))}
+                .let{WorkspaceEdit(it)}
+                // Apply the edit to the client
+                .let{ApplyWorkspaceEditParams(it)}
+                .also{client?.applyEdit(it)}
+        },
+    )
+
+
+    override val workspaceService = KotlinWorkspaceService(
+        fileProvider,
+        sourceFileRepository,
+        workspaceActions)
+
+    private fun resolveCompiler(kind: CompilationKind): Compiler =
+        workspaceService.compiler.value.let {
+            if (kind==CompilationKind.DEFAULT)
+                it.first
+            else it.second
+        }
+
+    private val tempDirectory = TemporaryDirectory()
+
+    override val textDocumentService = KotlinTextDocumentService(
+        sourceFileRepository,
+        tempDirectory,
+        fileProvider)
+
+    override val extensions = KotlinProtocolExtensionService(
+        fileProvider,
+        sourceFileRepository)
+
+    private var client: LanguageClient? = null
 
     override fun connect(client: LanguageClient) {
         this.client = client
-        workspaceService.connect(client)
         textDocumentService.connect(client)
         log.info("Connected to client")
     }
@@ -184,10 +167,8 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
 
     override fun close() {
         textDocumentService.close()
-        compilers.first.close()
-        compilers.second.close()
+        workspaceService.close()
         tempDirectory.close()
-        compilerTmpDir.close()
     }
 
     override suspend fun shutdown(): Any? {
@@ -196,5 +177,4 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     }
 
     override fun exit() {}
-
 }

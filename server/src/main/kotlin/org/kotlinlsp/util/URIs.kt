@@ -4,7 +4,6 @@ import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
-import java.nio.file.Paths
 import kotlin.io.path.toPath
 
 /**
@@ -20,10 +19,12 @@ fun parseURI(uri: String): URI =
     .getOrDefault(uri)
     .let { URI.create(it) }
 
-val URI.filePath: Path? get() = runCatching { Paths.get(this) }.getOrNull()
-
-val URI.fileName: String
-    get() = toPath().getFileName().toString()
+val URI.filePath: Path? get() =
+    toPath()
+val URI.fileName: String get() =
+    toPath()
+        .getFileName()
+        .toString()
 
 val URI.queryMap:Map<String, String> get()=
     getQuery()
@@ -37,13 +38,18 @@ val URI.queryMap:Map<String, String> get()=
         .toMap()
 
 /** Fetches the file extension WITHOUT the dot. */
-val URI.fileExtension: String?
-    get() {
-        return getPath().split(".")
-            .takeIf{it.size > 1}
-            ?.takeLast(1)
-            ?.first()
-    }
+val URI.fileExtension: String? get() =
+    getPath()
+        .split(".")
+        .takeIf{it.size > 1}
+        ?.takeLast(1)
+        ?.first()
+
+val URI.greedyFileExtension: String? get() =
+    schemeSpecificPart
+        .dropWhile{it!='.'}
+        .drop(1)
+        .ifEmpty { null }
 
 @Deprecated("")
 fun describeURIs(uris: Collection<URI>): String =
@@ -51,12 +57,3 @@ fun describeURIs(uris: Collection<URI>): String =
     else if (uris.size > 5) "${uris.size} files"
     else uris.map{it.toString()}.joinToString(", ")
 
-@Deprecated("")
-fun describeURI(uri: String): String = describeURI(parseURI(uri))
-
-@Deprecated("")
-fun describeURI(uri: URI): String =
-    uri.path
-      ?.let { it.partitionAroundLast("/") }
-      ?.let { (parent, fileName) -> ".../" + parent.substringAfterLast("/") + fileName }
-      ?: uri.toString()

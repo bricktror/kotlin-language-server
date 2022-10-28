@@ -15,7 +15,6 @@ import kotlin.concurrent.withLock
 import kotlin.coroutines.*
 import kotlinx.coroutines.*
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent
-import org.kotlinlsp.CompilerClassPath
 import org.kotlinlsp.CompilationKind
 import org.kotlinlsp.Compiler
 import org.kotlinlsp.index.Symbol
@@ -24,6 +23,7 @@ import org.kotlinlsp.index.SymbolTransaction
 import org.kotlinlsp.index.receiverTypeFqn
 import org.kotlinlsp.logging.*
 import org.kotlinlsp.util.arrow.*
+import org.kotlinlsp.file.FileProvider
 import org.kotlinlsp.util.fileExtension
 import org.kotlinlsp.util.filePath
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
@@ -39,7 +39,7 @@ import org.jetbrains.kotlin.resolve.scopes.DescriptorKindFilter
 // TODO thread safety? Make suspendable functions using worker thread?
 class SourceFileRepository(
     private val compiler: (CompilationKind)->Compiler,
-    private val contentProvider: FileContentProvider,
+    private val contentProvider: FileProvider,
     val index : SymbolIndex,
 ) {
     private val log by findLogger

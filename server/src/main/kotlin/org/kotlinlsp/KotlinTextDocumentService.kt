@@ -160,7 +160,6 @@ import org.jetbrains.kotlin.types.typeUtil.replaceArgumentsWithStarProjections
 import org.jetbrains.kotlin.util.OperatorNameConventions
 import org.kotlinlsp.CompilationKind
 import org.kotlinlsp.Compiler
-import org.kotlinlsp.CompilerClassPath
 import org.kotlinlsp.createFunctionStub
 import org.kotlinlsp.createVariableStub
 import org.kotlinlsp.findReferences
@@ -179,15 +178,12 @@ import org.kotlinlsp.logging.findLogger
 import org.kotlinlsp.lsp4kt.*
 import org.kotlinlsp.overridesDeclaration
 import org.kotlinlsp.referenceAt
-import org.kotlinlsp.source.FileContentProvider
+import org.kotlinlsp.file.FileProvider
 import org.kotlinlsp.source.SourceFile
 import org.kotlinlsp.source.SourceFileRepository
-import org.kotlinlsp.util.TemporaryDirectory
+import org.kotlinlsp.file.TemporaryDirectory
 import org.kotlinlsp.util.arrow.*
 import org.kotlinlsp.util.containsCharactersInOrder
-import org.kotlinlsp.util.describeURI
-import org.kotlinlsp.util.describeURIs
-import org.kotlinlsp.util.emptyResult
 import org.kotlinlsp.util.extractRange
 import org.kotlinlsp.util.fileExtension
 import org.kotlinlsp.util.fileName
@@ -198,10 +194,8 @@ import org.kotlinlsp.util.indexToPosition
 import org.kotlinlsp.util.isSubrangeOf
 import org.kotlinlsp.util.isZero
 import org.kotlinlsp.util.locationInFile
-import org.kotlinlsp.util.noResult
 import org.kotlinlsp.util.onEachIndexed
 import org.kotlinlsp.util.parseURI
-import org.kotlinlsp.util.partitionAroundLast
 import org.kotlinlsp.util.preOrderTraversal
 import org.kotlinlsp.util.stringDistance
 import org.kotlinlsp.util.toLsp4jRange
@@ -212,8 +206,7 @@ private val log by findLogger.atToplevel(object{})
 class KotlinTextDocumentService(
     private val sp: SourceFileRepository,
     private val tempDirectory: TemporaryDirectory,
-    private val fileContentProvider: FileContentProvider,
-    private val cp: CompilerClassPath,
+    private val fileProvider: FileProvider,
 ) : TextDocumentService, Closeable {
     private val log by findLogger
     private lateinit var client: LanguageClient
@@ -260,7 +253,7 @@ class KotlinTextDocumentService(
         log.info{"Hovering at ${position.describePosition()}"}
         return recover(position)
             .let{ (file, cursor)-> hoverAt(file, cursor) }
-            ?: noResult("No hover found at ${position.describePosition()}", null)
+            ?: run {log.info{"No hover found at ${position.describePosition()}"}; null}
     }
 
     override suspend fun documentHighlight(position: DocumentHighlightParams): List<DocumentHighlight> {
@@ -288,10 +281,10 @@ class KotlinTextDocumentService(
     override suspend fun definition(position: DefinitionParams): Either<List<Location>, List<LocationLink>> {
         log.info{"Go-to-definition at ${position.describePosition()}"}
         val (file, cursor) = recover(position)
-        return goToDefinition(file, cursor, fileContentProvider, tempDirectory, cp)
+        return goToDefinition(file, cursor, fileProvider, tempDirectory)
             ?.let(::listOf)
             ?.let { Either.Left(it) }
-            ?: noResult("Couldn't find definition at ${position.describePosition()}", Either.Left(emptyList()))
+            ?: run{log.info{"Couldn't find definition at ${position.describePosition()}"}; Either.Left(emptyList())}
     }
 
     override suspend fun rangeFormatting(params: DocumentRangeFormattingParams): List<TextEdit> {
@@ -375,7 +368,7 @@ class KotlinTextDocumentService(
             .also {
                 if(it == null) log.info{"No call around ${file.describePosition(cursor)}"}
             }
-            ?: noResult("No function call around ${position.describePosition()}", null)
+            ?: run{log.info{"No function call around ${position.describePosition()}"}; null}
     }
 
     private fun activeDeclaration(call: KtCallExpression, candidates: List<CallableDescriptor>): Int =
@@ -478,7 +471,7 @@ class KotlinTextDocumentService(
     }
 
     private fun doLint(cancelCallback: () -> Boolean) {
-        log.info{"Linting ${describeURIs(lintTodo)}"}
+        log.info{"Linting ${lintTodo}"}
         val files = lintTodo.toList().also{ lintTodo.clear() }
         val context = CompositeBindingContext.create( sp.compileFiles(files).map{it.context})
         if (!cancelCallback.invoke()) {
@@ -697,9 +690,8 @@ private fun formatKotlinCode(
 private fun goToDefinition(
     file: SourceFile.Compiled,
     cursor: Int,
-    classContentProvider: FileContentProvider,
+    classContentProvider: FileProvider,
     tempDir: TemporaryDirectory,
-    cp: CompilerClassPath
 ): Location? {
     TODO()
     /* val (_, target) = file.context.referenceAt(cursor) ?: return null */
@@ -716,7 +708,7 @@ private fun goToDefinition(
 
     /* val rawClassURI = destination.uri */
 
-    /* if (!isInsideArchive(rawClassURI, cp)) return null */
+    /* if (!isInsideArchive(rawClassURI, classPath)) return null */
     /* parseURI(rawClassURI) */
     /*     .let { classContentProvider.read(it) } */
     /*     ?.let { (klsSourceURI, content) -> */
@@ -750,8 +742,8 @@ private fun goToDefinition(
 }
 
     /* val javaHome: String? = System.getProperty("java.home", null) */
-/* private fun isInsideArchive(uri: String, cp: CompilerClassPath) = */
-/*     uri.contains(".jar!") || uri.contains(".zip!") || cp.javaHome?.let { */
+/* private fun isInsideArchive(uri: String, classPath: CompilerClassPath) = */
+/*     uri.contains(".jar!") || uri.contains(".zip!") || classPath.javaHome?.let { */
 /*         Paths.get(parseURI(uri)).toString().startsWith(File(it).path) */
 /*     } ?: false */
 
@@ -867,7 +859,8 @@ private fun findReferences(declaration: KtNamedDeclaration, sp: SourceFileReposi
  * @returns ranges of references in the file. Empty list if none are found
  */
 private fun findReferencesToDeclarationInFile(declaration: KtNamedDeclaration, file: SourceFile.Compiled): List<Range> {
-    val descriptor = file.context[BindingContext.DECLARATION_TO_DESCRIPTOR, declaration] ?: return emptyResult("Declaration ${declaration.fqName} has no descriptor")
+    val descriptor = file.context[BindingContext.DECLARATION_TO_DESCRIPTOR, declaration]
+        ?: return run{log.info{"Declaration ${declaration.fqName} has no descriptor"}; emptyList()}
     val bindingContext = file.context
 
     val references = when {
@@ -899,7 +892,7 @@ private fun doFindReferences(file: Path, cursor: Int, sp: SourceFileRepository):
 private fun doFindReferences(element: KtNamedDeclaration, sp: SourceFileRepository): Collection<KtElement> {
     val declaration = sp.compileFile(element.containingFile.toPath().toUri())
         .context[BindingContext.DECLARATION_TO_DESCRIPTOR, element]
-        ?: return emptyResult("Declaration ${element.fqName} has no descriptor")
+        ?: return run{log.info{"Declaration ${element.fqName} has no descriptor"}; emptyList()}
     val recompile = possibleReferences(declaration, sp)
         .map { it.toPath().toUri() }
         .also { log.debug("Scanning ${it.size} files for references to ${element.fqName}") }
@@ -1535,14 +1528,16 @@ private fun elementCompletions(
             // ::?
             else {
                 log.info("Completing function reference '${surroundingElement.text}'")
-                val scope = file.scopeAtPoint(surroundingElement.startOffset) ?: return noResult("No scope at ${file.describePosition(cursor)}", emptySequence())
+                val scope = file.scopeAtPoint(surroundingElement.startOffset)
+                    ?: return run{log.info{"No scope at ${file.describePosition(cursor)}"}; emptySequence()}
                 identifiers(scope)
             }
         }
         // ?
         is KtNameReferenceExpression -> {
             log.info("Completing identifier '${surroundingElement.text}'")
-            val scope = file.scopeAtPoint(surroundingElement.startOffset) ?: return noResult("No scope at ${file.describePosition(cursor)}", emptySequence())
+            val scope = file.scopeAtPoint(surroundingElement.startOffset)
+                ?: return run{log.info{"No scope at ${file.describePosition(cursor)}"}; emptySequence()}
             identifiers(scope)
         }
         else -> {

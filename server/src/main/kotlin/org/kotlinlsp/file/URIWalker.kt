@@ -1,4 +1,4 @@
-package org.kotlinlsp.source
+package org.kotlinlsp.file
 
 import java.net.URI
 import java.nio.file.Path
@@ -58,7 +58,7 @@ class DirectoryIgnoringURIWalker(
 
 class GitIgnoreURIWalker(
     private val inner: URIWalker,
-    private val contentProvider: FileContentProvider,
+    private val contentProvider: FileProvider,
 ): URIWalker {
 
     override fun walk(shouldRecurse: (URI)->Boolean): Sequence<URI> {

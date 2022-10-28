@@ -47,11 +47,9 @@ import org.kotlinlsp.logging.*
 import org.kotlinlsp.logging.findLogger
 import org.kotlinlsp.util.indexToPosition
 import org.kotlinlsp.util.arrow.*
-import org.kotlinlsp.util.describeURI
 import org.kotlinlsp.util.fileExtension
 import org.kotlinlsp.util.filePath
 import org.kotlinlsp.util.findParent
-import org.kotlinlsp.util.nullResult
 import org.kotlinlsp.util.toPath
 import org.kotlinlsp.referenceAt
 
@@ -197,11 +195,11 @@ abstract class SourceFile {
             val element = parseAtPoint(cursor, asReference = true)
             val cursorExpr = element
                 ?.findParent<KtExpression>()
-                ?: return nullResult("Couldn't find expression at ${describePosition(cursor)} (only found $element)")
+                ?: return run{log.info{"Couldn't find expression at ${describePosition(cursor)} (only found $element)"}; null}
             val surroundingExpr = expandForReference(cursor, cursorExpr)
                 .also { log.info("Hovering ${it}") }
             val scope = scopeAtPoint(cursor)
-                ?: return nullResult("Couldn't find scope at ${describePosition(cursor)}")
+                ?: return run{log.info{"Couldn't find scope at ${describePosition(cursor)}"}; null}
             return compiler.compileKtExpression(surroundingExpr, scope, sourcePath)
                 .let { it.referenceAt(cursor) }
         }
@@ -225,7 +223,7 @@ abstract class SourceFile {
                 ?.first
                 ?: TextRange(cursor, cursor)
             val psi = ktFile.findElementAt(oldOffset(cursor))
-                ?: return nullResult("Couldn't find anything at ${describePosition(cursor)}")
+                ?: return run{log.info{"Couldn't find anything at ${describePosition(cursor)}"}; null}
             val oldParent = psi.parentsWithSelf
                     .filterIsInstance<KtDeclaration>()
                     .firstOrNull { it.textRange.contains(oldChanged) }
@@ -283,7 +281,7 @@ abstract class SourceFile {
          */
         fun elementAtPoint(cursor: Int): KtElement? {
             val oldCursor = oldOffset(cursor)
-            val psi = ktFile.findElementAt(oldCursor) ?: return nullResult("Couldn't find anything at ${describePosition(cursor)}")
+            val psi = ktFile.findElementAt(oldCursor) ?: return run{log.info{"Couldn't find anything at ${describePosition(cursor)}"}; null}
             return psi.findParent<KtElement>()
         }
 

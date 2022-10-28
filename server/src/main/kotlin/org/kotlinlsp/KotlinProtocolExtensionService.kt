@@ -4,7 +4,7 @@ import org.eclipse.lsp4j.*
 import org.kotlinlsp.util.parseURI
 import org.kotlinlsp.lsp4kt.ProtocolExtensions
 import org.kotlinlsp.source.SourceFileRepository
-import org.kotlinlsp.source.FileContentProvider
+import org.kotlinlsp.file.FileProvider
 import org.kotlinlsp.util.getIndexIn
 import java.util.concurrent.CompletableFuture
 import java.nio.file.Paths
@@ -14,7 +14,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
 
 class KotlinProtocolExtensionService(
-    private val contentProvider: FileContentProvider,
+    private val contentProvider: FileProvider,
     private val sp: SourceFileRepository,
 ) : ProtocolExtensions {
 

@@ -6,6 +6,8 @@ import com.google.gson.JsonObject
 import com.intellij.lang.Language
 import com.intellij.lang.java.JavaLanguage
 import java.io.BufferedReader
+import java.io.Closeable
+import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.StringReader
@@ -14,6 +16,7 @@ import java.net.URI
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.PathMatcher
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 import kotlin.io.path.toPath
@@ -21,29 +24,61 @@ import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.LanguageClient
-import org.eclipse.lsp4j.services.LanguageClientAware
+import org.jetbrains.kotlin.idea.KotlinLanguage
+import org.kotlinlsp.file.CompositeURIWalker
+import org.kotlinlsp.file.DirectoryIgnoringURIWalker
+import org.kotlinlsp.file.FilesystemURIWalker
+import org.kotlinlsp.file.TemporaryFile
+import org.kotlinlsp.file.FileProvider
 import org.kotlinlsp.logging.*
 import org.kotlinlsp.lsp4kt.*
-import org.kotlinlsp.source.FileContentProvider
 import org.kotlinlsp.source.SourceFileRepository
-import org.kotlinlsp.util.describeURI
-import org.kotlinlsp.util.describeURIs
+import org.kotlinlsp.util.execAndReadStdoutAndStderr
+import org.kotlinlsp.util.fileName
 import org.kotlinlsp.util.filePath
+import org.kotlinlsp.util.findCommandOnPath
 import org.kotlinlsp.util.parseURI
-import org.kotlinlsp.util.partitionAroundLast
-import org.jetbrains.kotlin.idea.KotlinLanguage
+
+private val log by findLogger.atToplevel(object{})
 
 class KotlinWorkspaceService(
-    private val sp: SourceFileRepository,
-    private val cp: CompilerClassPath,
-    private val docService: KotlinTextDocumentService,
+    private val fileProvider: FileProvider,
+    private val sourceFileRepository: SourceFileRepository,
     private val commands: Map<String, (List<Any>)->Any?>,
-) : WorkspaceService, LanguageClientAware {
+) : WorkspaceService, Closeable {
     private val log by findLogger
-    private var languageClient: LanguageClient? = null
+    init {
+        log.fine("WorkspaceService created")
+    }
 
-    override fun connect(client: LanguageClient): Unit {
-        languageClient = client
+    private val innerWorkspaceRoots = mutableMapOf<URI, FilesystemURIWalker>()
+    val workspaceRoots get()= innerWorkspaceRoots.keys.toSet()
+
+    override fun close() {
+        closeCompiler()
+    }
+
+    var compiler = lazy { createCompiler() }
+    fun createCompiler(): Pair<Compiler, Compiler> =
+        resolveClasspath(fileProvider, innerWorkspaceRoots.values.map{it.root})
+            .let { (classpath, buildClasspath)->
+                log.debug{"Instantiating compilers"}
+                log.fine { "Compiler for source uses classpath ${classpath}" }
+                log.fine { "Compiler for buildscript uses classpath ${buildClasspath}" }
+                CompilerImpl(classpath, "default") to CompilerImpl(buildClasspath, "default")
+            }
+
+    private fun invalidateCompiler(){
+        compiler = lazy { createCompiler() }
+        sourceFileRepository.refresh()
+    }
+    private fun closeCompiler() {
+        if (!compiler.isInitialized()) return
+        log.fine("closing compilers")
+        compiler.value.let{(a,b)->
+            a.close()
+            b.close()
+        }
     }
 
     override suspend fun executeCommand(params: ExecuteCommandParams): Any? {
@@ -55,11 +90,20 @@ class KotlinWorkspaceService(
 
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
         params.changes
-            .map { parseURI(it.uri) to it.type }
-            .forEach { (uri,type)-> when (type) {
-                FileChangeType.Created -> createdOnDisk(uri)
-                FileChangeType.Deleted -> deletedOnDisk(uri)
-                FileChangeType.Changed -> changedOnDisk(uri)
+            .map { it.type to parseURI(it.uri) }
+            .forEach { (type, uri)-> when (type) {
+                FileChangeType.Created -> {
+                    sourceFileRepository.readFromProvider(uri)
+                    onChange(uri)
+                }
+                FileChangeType.Deleted -> {
+                    sourceFileRepository.remove(uri)
+                    onChange(uri)
+                }
+                FileChangeType.Changed -> {
+                    sourceFileRepository.readFromProvider(uri)
+                    onChange(uri)
+                }
             } }
     }
 
@@ -72,40 +116,145 @@ class KotlinWorkspaceService(
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
         params.event.added
             .map {parseURI(it.uri)}
-            .forEach{
-                log.info("Adding workspace ${it} to source path")
-                addWorkspaceRoot(it)
-            }
+            .forEach{ addWorkspaceRoot(it) }
         params.event.removed
             .map {parseURI(it.uri)}
-            .forEach {
-                log.info("Dropping workspace ${it} from source path")
-                removeWorkspaceRoot(it)
-            }
-    }
-
-    fun createdOnDisk(uri: URI) {
-        sp.readFromProvider(uri)
-        cp.createdOnDisk(uri)
-    }
-
-    fun deletedOnDisk(uri: URI) {
-        sp.remove(uri)
-        cp.deletedOnDisk(uri)
-    }
-
-    fun changedOnDisk(uri: URI) {
-        sp.readFromProvider(uri)
-        cp.changedOnDisk(uri)
+            .forEach { removeWorkspaceRoot(it) }
     }
 
     fun addWorkspaceRoot(root: URI) {
-        cp.addWorkspaceRoot(root)
-            .forEach { sp.readFromProvider(it) }
+        log.info("Adding workspace root ${root}")
+        val walker= root.filePath
+            ?.let(::FilesystemURIWalker)
+            ?: run {
+                log.warning("Unable to walk root ${root}. Ignored")
+                return
+            }
+        innerWorkspaceRoots[root]=walker
+        invalidateCompiler()
+        walker
+            .walk()
+            .map{ it.toPath() }
+            .filter { it.fileName.run { endsWith(".kt") || endsWith(".kts") }}
+            .map { it.toUri() }
+            .forEach { sourceFileRepository.readFromProvider(it) }
     }
 
     fun removeWorkspaceRoot(root: URI) {
-        sp.removeMatching{ it.toPath().startsWith(root.toPath()) }
-        cp.removeWorkspaceRoot(root)
+        log.info("Removing workspace root ${root}")
+        val walker=innerWorkspaceRoots
+            .remove(root)
+            ?: run {
+                log.warning("Root ${root} is not tracked. Unable to remove.")
+                return
+            }
+        sourceFileRepository.removeMatching{ walker.contains(it) }
+        invalidateCompiler()
+    }
+
+    private val uriWalker get()=
+        DirectoryIgnoringURIWalker(
+                // TODO read gitignore for each path
+                ignoredDirectories=listOf(".*", "bin", "build", "node_modules", "target"),
+                inner = CompositeURIWalker(innerWorkspaceRoots.values))
+
+    private fun onChange(uri: URI) {
+        if (!uriWalker.contains(uri)) return
+        val updateClassPath = File(uri.getPath()).getName().let {
+            it == "pom.xml" || it.endsWith(".gradle") || it.endsWith(".gradle.kts")
+        }
+        if(!updateClassPath) return
+        invalidateCompiler()
+    }
+}
+// TODO more sources than gradle? Look in git history for maven and more
+
+fun resolveClasspath(
+    fileProvider: FileProvider,
+    workspaceRoots: Collection<Path>
+) = fileProvider
+    .getFile(URI("kls.resource", "kotlinDSLClassPathFinder.gradle.kts", ""))
+    .let { it ?: return emptySet<Path>() to emptySet<Path>() }
+    .let { tmpFile->
+        val helperScript = tmpFile
+            .path
+            .toAbsolutePath()
+            .toString()
+
+        workspaceRoots
+            .flatMap {
+                resolveClasspathUsingGradle(it, helperScript)
+                    .map { (a,b)->a to b }
+            }
+    }
+    .toMap()
+    .let { map->
+        fun asPaths(key: String) =
+            map.values // TODO per-project partitioning?
+                .flatMap{it.get(key) ?: listOf()}
+                .map { Paths.get(it) }
+                .toSet()
+                .also{log.debug("${key} classpath found ${it.size} dependencies")}
+        asPaths("dependency") to asPaths("build-dependency")
+    }
+
+private fun resolveClasspathUsingGradle(path: Path, helperScript: String) =
+        run {
+            log.info("Resolving dependencies for '${path}' through Gradle's CLI")
+            execAndReadStdoutAndStderr(path, listOf(
+                    getGradleCommand(path).toString(),
+                    "-I", helperScript,
+                    "kotlin-lsp-deps",
+                    "--console=plain",
+                ))
+        }
+        .let { (result, errors) ->
+            if(!errors.isBlank())
+                log.warning("Gradle ran with errors: ${errors}")
+            log.fine(result)
+            result
+        }
+        .let{it.lines()}
+        .mapNotNull { GradleKotlinLspRow.tryParse(it) }
+        .let { GradleKotlinLspRow.inflateStructure(it) }
+
+
+private data class GradleKotlinLspRow(
+    val project: String,
+    val key: String,
+    val value: String,
+) {
+    companion object {
+        private val pattern = "^kotlin-lsp ((?:\\ |[^ ])+) (\\S+) (.+)$".toRegex()
+        fun tryParse(line: String) =
+            pattern.find(line)
+                ?.groups
+                ?.let { GradleKotlinLspRow(
+                    project=it[1]!!.value
+                        .replace("\\ ", " ")
+                        .replace("\\\\", "\\"),
+                    key=it[2]!!.value,
+                    value=it[3]!!.value)
+                }
+
+        fun inflateStructure(
+            items: Collection<GradleKotlinLspRow>
+        ): Map<String, Map<String, List<String>>> =
+            items
+                .groupBy{it.project}
+                .map { (project, rows)-> project to rows.groupBy({it.key}, {it.value}) }
+                .toMap()
+
+    }
+}
+
+private fun getGradleCommand(workspace: Path): Path {
+    val wrapper = workspace.resolve("gradlew").toAbsolutePath()
+    if (Files.isExecutable(wrapper)) {
+        return wrapper
+    } else {
+        return workspace.parent?.let(::getGradleCommand)
+            ?: findCommandOnPath("gradle")
+            ?: throw Error("Could not find 'gradle' on PATH")
     }
 }

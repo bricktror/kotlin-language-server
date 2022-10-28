@@ -79,13 +79,10 @@ import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
 import org.jetbrains.kotlin.util.KotlinFrontEndException
 import org.kotlinlsp.j2k.JavaElementConverter
 import org.kotlinlsp.logging.*
-import org.kotlinlsp.resolveClasspath
-import org.kotlinlsp.source.CompositeURIWalker
-import org.kotlinlsp.source.DirectoryIgnoringURIWalker
-import org.kotlinlsp.source.FilesystemURIWalker
-import org.kotlinlsp.source.URIWalker
-import org.kotlinlsp.util.TempFile
-import org.kotlinlsp.util.TemporaryDirectory
+import org.kotlinlsp.file.CompositeURIWalker
+import org.kotlinlsp.file.DirectoryIgnoringURIWalker
+import org.kotlinlsp.file.FilesystemURIWalker
+import org.kotlinlsp.file.URIWalker
 import org.kotlinlsp.util.fileExtension
 import org.kotlinlsp.util.filePath
 
@@ -133,9 +130,8 @@ interface Compiler: Closeable {
  * The basic strategy for compiling one file at-a-time is outlined in OneFilePerformance.
  */
 class CompilerImpl(
-    javaSourcePath: Set<Path>,
     classPath: Set<Path>,
-    private val outputDirectory: File,
+    /* Which JVM target the Kotlin compiler uses. See Compiler.jvmTargetFrom for possible values. */
     jvmTarget: String,
 ) : Compiler {
     private val log by findLogger
@@ -144,7 +140,6 @@ class CompilerImpl(
 
     private val environment = initKotlinCoreEnvironment(
         disposable,
-        javaSourcePath.map{it.toFile()},
         classPath,
         jvmTarget)
 
@@ -529,7 +524,6 @@ private fun KotlinCompilerConfiguration.getScriptDefinitions(
  */
 private fun initKotlinCoreEnvironment(
     disposable: Disposable,
-    javaSourcePath: List<File>,
     classPath: Set<Path>,
     jvmTarget: String,
 ): KotlinCoreEnvironment = KotlinCoreEnvironment
@@ -550,7 +544,8 @@ private fun initKotlinCoreEnvironment(
                 put(JVMConfigurationKeys.USE_PSI_CLASS_FILES_READING, true)
 
                 addJvmClasspathRoots(classPath.map { it.toFile() })
-                addJavaSourceRoots(javaSourcePath)
+                // TODO re-add java source roots. Previous implementation added all java-files but should probably be the roots of the source paths (e.g. my-project/src/main/java/)?
+                /* addJavaSourceRoots(javaSourcePath) */
 
                 addAll(ScriptingConfigurationKeys.SCRIPT_DEFINITIONS, sequence {
                         // Setup script templates (e.g. used by Gradle's Kotlin DSL)
@@ -592,89 +587,3 @@ private fun initKotlinCoreEnvironment(
                     StorageComponentContainerContributor.registerExtension(environment.project, it)
                 }
         }
-
-
-/**
- * Manages the class path (compiled JARs, etc), the Java source path
- * and the compiler. Note that Kotlin sources are stored in SourcePath.
- */
-class CompilerClassPath(
-    /* Which JVM target the Kotlin compiler uses. See Compiler.jvmTargetFrom for possible values. */
-    private val jvmTarget: String,
-    val outputDirectory: TemporaryDirectory,
-) {
-    private val log by findLogger
-
-    private val innerWorkspaceRoots = mutableMapOf<URI, FilesystemURIWalker>()
-    val workspaceRoots get()= innerWorkspaceRoots.keys.toSet()
-    private val javaSourcePath get()= uriWalker
-        .walk()
-        .filter{it.fileExtension == "java"}
-        .map{it.toPath()}
-        .toSet()
-
-    private val uriWalker get()=
-        DirectoryIgnoringURIWalker(
-                // TODO read gitignore for each path
-                ignoredDirectories=listOf(".*", "bin", "build", "node_modules", "target"),
-                inner = CompositeURIWalker(innerWorkspaceRoots.values))
-
-    fun createCompiler(): Pair<Compiler, Compiler> =
-        resolveClasspath(innerWorkspaceRoots.values.map{it.root})
-            .let { (classpath, buildClasspath)->
-                fun init(classpath: Set<Path>) =
-                    CompilerImpl(
-                        javaSourcePath,
-                        classpath,
-                        outputDirectory.file,
-                        jvmTarget)
-                init(classpath) to init(buildClasspath)
-            }
-
-    var onNewCompiler: ((Pair<Compiler, Compiler>)->Unit)?=null
-
-    fun addWorkspaceRoot(root: URI): Sequence<URI> {
-        log.info("Adding workspace root ${root}")
-        val workspaceWalker= root.filePath
-            ?.let(::FilesystemURIWalker)
-            ?: run {
-                log.warning("Unable to walk root ${root}. Ignored")
-                return emptySequence()
-            }
-        innerWorkspaceRoots[root]=workspaceWalker
-        invalidateCompiler()
-        return workspaceWalker
-            .walk()
-            .map{ it.toPath() }
-            .filter { it.fileName.run { endsWith(".kt") || endsWith(".kts") }}
-            .map { it.toUri() }
-    }
-
-    fun removeWorkspaceRoot(root: URI) {
-        log.info("Removing workspace root ${root}")
-        innerWorkspaceRoots.remove(root) ?: run {
-            log.warning("Root ${root} is not tracked. Unable to remove.")
-            return
-        }
-        invalidateCompiler()
-    }
-
-    fun createdOnDisk(uri: URI) = changedOnDisk(uri)
-    fun deletedOnDisk(uri: URI) = changedOnDisk(uri)
-    fun changedOnDisk(uri: URI) {
-        if (!uriWalker.contains(uri)) return
-        fun isBuildScript(uri: URI): Boolean = File(uri.getPath()).getName().let {
-            it == "pom.xml" || it.endsWith(".gradle") || it.endsWith(".gradle.kts")
-        }
-        fun isJavaSource(file: Path): Boolean = file.fileName.endsWith(".java")
-        val updateClassPath = isBuildScript(uri)
-        val updateJavaSourcePath = uri.filePath?.let(::isJavaSource) ?: false
-        if(!updateClassPath && !updateJavaSourcePath) return
-        invalidateCompiler()
-    }
-
-    /** Updates and possibly reinstantiates the compiler using new paths. */
-    private fun invalidateCompiler() {
-        onNewCompiler?.invoke(createCompiler())
-    }
-}

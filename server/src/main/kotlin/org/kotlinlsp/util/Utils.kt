@@ -23,11 +23,6 @@ fun execAndReadStdoutAndStderr(directory: Path, shellCommand: List<String>): Pai
 fun String.partitionAroundLast(separator: String): Pair<String, String> = lastIndexOf(separator)
     .let { Pair(substring(0, it), substring(it, length)) }
 
-fun Path.replaceExtensionWith(newExtension: String): Path {
-    val oldName = fileName.toString()
-    val newName = oldName.substring(0, oldName.lastIndexOf(".")) + newExtension
-    return resolveSibling(newName)
-}
 
 inline fun <T, C : Iterable<T>> C.onEachIndexed(transform: (index: Int, T) -> Unit): C = apply {
     var i = 0
@@ -36,18 +31,6 @@ inline fun <T, C : Iterable<T>> C.onEachIndexed(transform: (index: Int, T) -> Un
         i++
     }
 }
-
-@Deprecated("Replace with run{ log.info { message }; result }")
-fun <T> noResult(message: String, result: T): T {
-    log.info(message)
-    return result
-}
-
-@Deprecated("Replace with run{ log.info { message }; emptyList() }")
-fun <T> emptyResult(message: String): List<T> = noResult(message, emptyList())
-
-@Deprecated("Replace with run{ log.info { message }; null }")
-fun <T> nullResult(message: String): T? = noResult(message, null)
 
 /** Region that has been changed */
 fun changedRegion(oldContent: String, newContent: String): Pair<TextRange, TextRange>? {
