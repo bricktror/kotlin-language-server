@@ -15,10 +15,27 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.future.*
 
 class LanguageClientProgress(
+    private val client: LanguageClient,
     private val label: String,
     private val token: Either<String, Int>,
-    private val client: LanguageClient
-) : Progress {
+) : Closeable {
+
+    companion object {
+        suspend fun create(
+            client: LanguageClient,
+            label: String,
+            token: Either<String, Int>?=null
+        ): LanguageClientProgress {
+            if(token!=null)
+                return LanguageClientProgress(client, label, token)
+            val tt=Either.forLeft<String, Int>(UUID.randomUUID().toString())
+            client.createProgress(
+                    WorkDoneProgressCreateParams()
+                        .also { it.token = tt })
+                .await()
+            return LanguageClientProgress(client, label, tt)
+        }
+    }
 
     init {
         reportProgress(WorkDoneProgressBegin().also {
@@ -27,69 +44,19 @@ class LanguageClientProgress(
         })
     }
 
-    override fun reportProgress(message: String?, percent: Int?)
-        = reportProgress(WorkDoneProgressReport().also {
+    fun reportProgress(percent: Int, message: String?) =
+        reportProgress(WorkDoneProgressReport().also {
             it.message = message
             it.percentage = percent
         })
 
     override fun close() = reportProgress(WorkDoneProgressEnd())
 
-    private fun reportProgress(notification: WorkDoneProgressNotification)
-        = client.notifyProgress(ProgressParams(token, Either.forLeft(notification)))
-
-    class Factory(private val client: LanguageClient) : Progress.Factory {
-        override fun create(label: String): CompletableFuture<Progress> {
-            val token = Either.forLeft<String, Int>(UUID.randomUUID().toString())
-            val xx = WorkDoneProgressCreateParams().also {
-                it.token = token
-            }
-            val scope = CoroutineScope(Dispatchers.Default)
-            return scope.async {
-                client.createProgress(xx).await()
-                LanguageClientProgress(label, token, client)
-            }.asCompletableFuture()
-        }
-    }
+    private fun reportProgress(notification: WorkDoneProgressNotification) =
+        client.notifyProgress(ProgressParams(token, Either.forLeft(notification)))
 }
 
-/** A facility for emitting progress notifications. */
-interface Progress : Closeable {
-    /**
-     * Updates the progress percentage. The
-     * value should be in the range [0, 100].
-     */
-    fun reportProgress(message: String? = null, percent: Int? = null)
-
-    object None : Progress {
-        override fun reportProgress(message: String?, percent: Int?) {}
-
-        override fun close() {}
-    }
-
-    @Deprecated("")
-    interface Factory {
-        /**
-         * Creates a new progress listener with
-         * the given label. The label is intended
-         * to be human-readable.
-         */
-        fun create(label: String): CompletableFuture<Progress>
-
-        object None : Factory {
-            override fun create(label: String): CompletableFuture<Progress> = CompletableFuture.completedFuture(Progress.None)
-        }
-    }
-}
-
-
-fun <T> Progress.Factory.create(label: String, scope: Progress.() -> T)
-    = CoroutineScope(Dispatchers.Default).launch {
-        val instance=create(label).await()
-        instance.use { scope(it) }
-    }.asCompletableFuture()
-
-fun <T> Progress.reportSequentially(
+fun <T> LanguageClientProgress.reportSequentially(
     items: Collection<T>,
     nameSelector: ((item:T)-> String?)={null},
     action: SequentialProgressScope.(item: T)->Unit
@@ -100,7 +67,7 @@ fun <T> Progress.reportSequentially(
             val progressPercent = (100 * index) / items.size
             val x = object: SequentialProgressScope {
                 override fun report(message: String?) {
-                    reportProgress(progressPrefix+message, progressPercent)
+                    reportProgress(progressPercent, progressPrefix+message)
                 }
             }
             action(x, item)

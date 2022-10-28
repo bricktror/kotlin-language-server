@@ -37,7 +37,6 @@ class KotlinWorkspaceService(
     private val sp: SourceFileRepository,
     private val cp: CompilerClassPath,
     private val docService: KotlinTextDocumentService,
-    private val config: Configuration,
     private val commands: Map<String, (List<Any>)->Any?>,
 ) : WorkspaceService, LanguageClientAware {
     private val log by findLogger
@@ -61,58 +60,13 @@ class KotlinWorkspaceService(
                 FileChangeType.Created -> createdOnDisk(uri)
                 FileChangeType.Deleted -> deletedOnDisk(uri)
                 FileChangeType.Changed -> changedOnDisk(uri)
-                null -> Unit
             } }
     }
 
-    var onConfigChange: ((Configuration)->Unit)? = null
-
     override fun didChangeConfiguration(params: DidChangeConfigurationParams) {
-        val settings = params.settings as? JsonObject
+        val settings = params.settings as? JsonObject ?: return
         log.info("Updating configuration: ${settings}")
-        if(settings == null) return
-
-        settings.get("kotlin").apply {
-            fun g(vararg path: String) =
-                path.fold(this) { s, segment ->
-                    s?.asJsonObject?.get(segment)
-                }
-
-            /* // Update deprecated configuration keys */
-            /* g("debounceTime")?.asLong?.let { */
-            /*     config.lintDebounceTime = it */
-            /*     docService.updateDebouncer() */
-            /* } */
-            /* // Update linter options */
-            /* g("linting", "debounceTime")?.asLong?.also { */
-            /*     config.lintDebounceTime = it */
-            /*     docService.updateDebouncer() */
-            /* } */
-
-            g("snippetsEnabled")?.asBoolean?.let {
-                config.snippets = it
-            }
-
-            // Update compiler options
-            g("compiler", "jvm", "target")?.asString?.also {
-                config.jvmTarget=it
-            }
-
-            // Update code-completion options
-            g("completion", "snipptes", "enabled")?.asBoolean?.also {
-                config.snippets = it
-            }
-
-            // Update indexing options
-            g("indexing", "enabled")?.asBoolean?.also {
-                config.indexEnabled = it
-            }
-
-            g("externalSources", "autoConvertToKotlin")?.asBoolean?.also {
-                config.autoConvertToKotlin = it
-            }
-        }
-        onConfigChange?.invoke(config)
+        // TODO allow for configuration
     }
 
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {

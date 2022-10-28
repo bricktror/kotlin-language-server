@@ -12,7 +12,6 @@ application {
 }
 
 repositories {
-    maven(url=uri("$projectDir/lib"))
     maven(url="https://jitpack.io")
 }
 
@@ -34,7 +33,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:${Versions.coroutines}")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:${Versions.coroutines}")
 
-    implementation("org.jetbrains:fernflower:1.0")
     implementation("com.h2database:h2:1.4.200")
     implementation("com.github.fwcd.ktfmt:ktfmt:b5d31d1")
     implementation("com.beust:jcommander:1.78")

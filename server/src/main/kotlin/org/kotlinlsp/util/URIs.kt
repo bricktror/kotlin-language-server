@@ -13,7 +13,12 @@ import kotlin.io.path.toPath
  * (including VSCode) invalidly percent-encode colons.
  */
 fun parseURI(uri: String): URI =
-    URI.create(runCatching { URLDecoder.decode(uri, StandardCharsets.UTF_8.toString()).replace(" ", "%20") }.getOrDefault(uri))
+    runCatching {
+        URLDecoder.decode(uri, StandardCharsets.UTF_8.toString())
+            .replace(" ", "%20")
+    }
+    .getOrDefault(uri)
+    .let { URI.create(it) }
 
 val URI.filePath: Path? get() = runCatching { Paths.get(this) }.getOrNull()
 

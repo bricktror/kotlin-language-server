@@ -5,6 +5,7 @@ import org.kotlinlsp.util.parseURI
 import org.kotlinlsp.lsp4kt.ProtocolExtensions
 import org.kotlinlsp.source.SourceFileRepository
 import org.kotlinlsp.source.FileContentProvider
+import org.kotlinlsp.util.getIndexIn
 import java.util.concurrent.CompletableFuture
 import java.nio.file.Paths
 
@@ -20,13 +21,7 @@ class KotlinProtocolExtensionService(
     override suspend fun jarClassContents(textDocument: TextDocumentIdentifier) =
         contentProvider.read(parseURI(textDocument.uri))
 
-    override suspend fun overrideMember(position: TextDocumentPositionParams): List<CodeAction> {
-        val compiledFile = sp
-            .compileFile(parseURI(position.textDocument.uri))
-            .asCompiledFile()
-        return listOverridableMembers(
-            compiledFile,
-            offset(compiledFile.content, position.position)
-        )
-    }
+    override suspend fun overrideMember(position: TextDocumentPositionParams): List<CodeAction> =
+        sp.compileFile(parseURI(position.textDocument.uri))
+            .let { listOverridableMembers( it, position.position.getIndexIn(it.content)) }
 }

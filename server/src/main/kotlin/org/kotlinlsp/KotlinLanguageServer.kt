@@ -21,19 +21,18 @@ import org.kotlinlsp.externalsources.*
 import org.kotlinlsp.index.SymbolIndex
 import org.kotlinlsp.logging.*
 import org.kotlinlsp.lsp4kt.*
-import org.kotlinlsp.extractRange
 import org.kotlinlsp.semanticTokensLegend
 import org.kotlinlsp.source.*
 import org.kotlinlsp.util.TempFile
 import org.kotlinlsp.util.TemporaryDirectory
 import org.kotlinlsp.util.parseURI
+import org.kotlinlsp.util.extractRange
 
-class KotlinLanguageServer(
-    scope: CoroutineScope,
-) : LanguageServer, LanguageClientAware, Closeable {
-    private val config = Configuration()
+class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     private val compilerTmpDir = TempFile.createDirectory()
-    private val classPath = CompilerClassPath(config, compilerTmpDir)
+    private val classPath = CompilerClassPath(
+        "default",
+        compilerTmpDir)
 
     private var compilers = classPath.createCompiler()
     private fun resolveCompiler(kind: CompilationKind) =
@@ -56,7 +55,6 @@ class KotlinLanguageServer(
 
     override val textDocumentService = KotlinTextDocumentService(
         sourceFileRepository,
-        {config},
         tempDirectory,
         contentProvider,
         classPath)
@@ -70,7 +68,7 @@ class KotlinLanguageServer(
             sourceFileRepository
             //Get the segment that should be converted
             .content(parseURI(fileUri))
-            .let{extractRange(it, range)}
+            .let { range.extractRange(it) }
             // Apply the conversion
             .let{compilers.first.transpileJavaToKotlin(it)}
             // Wrap as an text-document edit
@@ -93,7 +91,6 @@ class KotlinLanguageServer(
         sourceFileRepository,
         classPath,
         textDocumentService,
-        config,
         workspaceActions)
 
     override val extensions = KotlinProtocolExtensionService(
@@ -121,13 +118,6 @@ class KotlinLanguageServer(
             compilers=it
             sourceFileRepository.refresh()
         }
-        workspaceService.onConfigChange={
-            compilers.let{(a,b)->
-                a.close()
-                b.close()
-            }
-            compilers=classPath.createCompiler()
-        }
     }
 
     override fun connect(client: LanguageClient) {
@@ -139,7 +129,7 @@ class KotlinLanguageServer(
 
     override suspend fun initialize(params: InitializeParams): InitializeResult {
         val clientCapabilities = params.capabilities
-        config.snippets = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false
+        /* config.snippets = clientCapabilities?.textDocument?.completion?.completionItem?.snippetSupport ?: false */
 
         /* if (clientCapabilities?.window?.workDoneProgress ?: false && client!=null) { */
             /* progressFactory = LanguageClientProgress.Factory(client!!) */

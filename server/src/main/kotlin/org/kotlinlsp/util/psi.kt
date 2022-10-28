@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import java.nio.file.Path
+import org.eclipse.lsp4j.Location
 import java.nio.file.Paths
 
 inline fun<reified Find> PsiElement.findParent() =
@@ -34,4 +35,11 @@ fun PsiFile.toPath(): Path =
             return Paths.get(path)
         }
     }
+
+fun PsiElement.locationInFile(): Location? {
+    val file = containingFile.toPath().toUri().toString()
+    return containingFile
+        ?.text
+        ?.let { Location(file, toLsp4jRange(it, textRange)) }
+}
 

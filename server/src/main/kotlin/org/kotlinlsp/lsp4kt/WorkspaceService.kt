@@ -36,13 +36,6 @@ class JavaWorkspaceServiceFacade(
         service.didChangeConfiguration(params)
     }
 
-    /*     @Suppress("DEPRECATION") */
-    /*     override fun symbol(params: WorkspaceSymbolParams): CompletableFuture<Either<List<SymbolInformation>, List<WorkspaceSymbol>>> { */
-    /*         val result = workspaceSymbols(params.query, sp) */
-
-    /*         return CompletableFuture.completedFuture(Either.forRight(result)) */
-    /*     } */
-
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
         service.didChangeWorkspaceFolders(params)
     }

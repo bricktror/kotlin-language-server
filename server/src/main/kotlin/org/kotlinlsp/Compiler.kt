@@ -2,8 +2,8 @@ package org.kotlinlsp
 
 import com.intellij.lang.Language
 import com.intellij.lang.java.JavaLanguage
-import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.StandardFileSystems
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.VirtualFileSystem
@@ -11,11 +11,17 @@ import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiFileFactory
 import java.io.Closeable
 import java.io.File
+import java.net.URI
 import java.net.URLClassLoader
+import java.nio.file.FileSystems
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.PathMatcher
 import java.nio.file.Paths
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
+import kotlin.coroutines.*
+import kotlin.io.path.toPath
 import kotlin.script.dependencies.Environment
 import kotlin.script.dependencies.ScriptContents
 import kotlin.script.experimental.dependencies.DependenciesResolver
@@ -25,11 +31,10 @@ import kotlin.script.experimental.host.ScriptingHostConfiguration
 import kotlin.script.experimental.host.configurationDependencies
 import kotlin.script.experimental.jvm.JvmDependency
 import kotlin.script.experimental.jvm.defaultJvmScriptingHostConfiguration
-import org.kotlinlsp.j2k.JavaElementConverter
-import org.kotlinlsp.logging.*
+import kotlinx.coroutines.*
+import org.jetbrains.kotlin.backend.common.output.OutputFileCollection
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
 import org.jetbrains.kotlin.cli.common.environment.setIdeaIoUseFallback
-import org.jetbrains.kotlin.cli.common.output.writeAllTo
 import org.jetbrains.kotlin.cli.jvm.compiler.CliBindingTrace
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
@@ -72,9 +77,19 @@ import org.jetbrains.kotlin.scripting.resolve.KotlinScriptDefinitionFromAnnotate
 import org.jetbrains.kotlin.types.TypeUtils
 import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
 import org.jetbrains.kotlin.util.KotlinFrontEndException
+import org.kotlinlsp.j2k.JavaElementConverter
+import org.kotlinlsp.logging.*
+import org.kotlinlsp.resolveClasspath
+import org.kotlinlsp.source.CompositeURIWalker
+import org.kotlinlsp.source.DirectoryIgnoringURIWalker
+import org.kotlinlsp.source.FilesystemURIWalker
+import org.kotlinlsp.source.URIWalker
+import org.kotlinlsp.util.TempFile
+import org.kotlinlsp.util.TemporaryDirectory
+import org.kotlinlsp.util.fileExtension
+import org.kotlinlsp.util.filePath
 
 private val log by findLogger.atToplevel(object{})
-
 
 /**
  * Determines the compilation environment used
@@ -88,9 +103,9 @@ enum class CompilationKind {
 }
 
 interface Compiler: Closeable {
-    fun createKtFile(
+    fun parseKt(
         content: String,
-        name: Path,
+        name: String,
     ): KtFile
 
     fun compileKtFile(
@@ -100,17 +115,17 @@ interface Compiler: Closeable {
 
     fun transpileJavaToKotlin(content: String): String?
 
-    fun generateCode(
+    fun generateClassFiles(
         module: ModuleDescriptor,
         bindingContext: BindingContext,
         file: KtFile
-    ): Closeable
+    ): OutputFileCollection
 
     fun compileKtExpression(
         expression: KtExpression,
         scopeWithImports: LexicalScope,
         sourcePath: Collection<KtFile>,
-    ): Pair<BindingContext, ComponentProvider>
+    ): BindingContext
 }
 
 /**
@@ -125,6 +140,7 @@ class CompilerImpl(
 ) : Compiler {
     private val log by findLogger
     private val disposable = Disposer.newDisposable()
+    override fun close() = Disposer.dispose(disposable)
 
     private val environment = initKotlinCoreEnvironment(
         disposable,
@@ -141,8 +157,8 @@ class CompilerImpl(
     }
 
     private fun createPsiFile(
-        content: String,
         name: String,
+        content: String,
         language: Language,
     ): PsiFile = PsiFileFactory.getInstance(environment.project)
         .createFileFromText(name, language, content.replace("\r", ""), true, false)
@@ -156,32 +172,14 @@ class CompilerImpl(
         language = JavaLanguage.INSTANCE,
     ).let(JavaElementConverter::transpileToKt)
 
-    override fun createKtFile(
+    override fun parseKt(
         content: String,
-        name: Path,
+        name: String,
     ) = createPsiFile(
         content=content,
         name=name.toString(),
         language = KotlinLanguage.INSTANCE,
     ) as KtFile
-
-    fun createKtExpression(content: String, name: Path = Paths.get("dummy.virtual.kt")): KtExpression =
-        createKtDeclaration("val x = $content", name)
-            .let {it  as KtProperty}
-            .initializer!!
-
-    fun createKtDeclaration(
-        content: String,
-        file: Path = Paths.get("dummy.virtual.kt"),
-    ): KtDeclaration =
-        createKtFile(content, file)
-            .declarations
-            .also { assert(it.size == 1) { "${it.size} it in $content" }}
-            .first()
-            .let { if (it !is KtScript) return it else it }
-            .declarations
-            .also { assert(it.size == 1) { "${it.size} declarations in script in $content" } }
-            .first()
 
     override fun compileKtFile(
         file: KtFile,
@@ -200,10 +198,10 @@ class CompilerImpl(
         expression: KtExpression,
         scopeWithImports: LexicalScope,
         sourcePath: Collection<KtFile>,
-    ): Pair<BindingContext, ComponentProvider> {
-        try {
+    ): BindingContext  =
+        compileLock.withLock {
             // Use same lock as 'compileFile' to avoid concurrency issues such as #42
-            compileLock.withLock {
+            try {
                 val (container, trace) = createContainer(sourcePath)
                 container
                     .get<ExpressionTypingServices>()
@@ -215,40 +213,33 @@ class CompilerImpl(
                         InferenceSession.default,
                         trace,
                         true)
-                return Pair(trace.bindingContext, container)
+                return trace.bindingContext
+            } catch (e: KotlinFrontEndException) {
+                throw Error("Error while analyzing: ${expression.text}", e)
             }
-        } catch (e: KotlinFrontEndException) {
-            throw Error("Error while analyzing: ${expression.text}", e)
         }
-    }
 
-    override fun generateCode(
+    override fun generateClassFiles(
         module: ModuleDescriptor,
         bindingContext: BindingContext,
         file: KtFile
-    ): Closeable = compileLock.withLock {
-        val state = GenerationState.Builder(
-            project = environment.project,
-            builderFactory = ClassBuilderFactories.BINARIES,
-            module = module,
-            bindingContext = bindingContext,
-            files = listOf(file),
-            configuration = environment.configuration
-        ).build()
-        KotlinCodegenFacade.compileCorrectFiles(state)
-        state.factory.writeAllTo(outputDirectory)
-        return object: Closeable {
-            override fun close() {
-                file.declarations
-                    .map {
-                        file.packageFqName
-                            .asString()
-                            .replace(".", File.separator) + File.separator + it.name + ".class"
-                    }
-                    .forEach { outputDirectory.resolve(it).delete() }
+    ): OutputFileCollection =
+        GenerationState
+            .Builder(
+                project = environment.project,
+                builderFactory = ClassBuilderFactories.BINARIES,
+                module = module,
+                bindingContext = bindingContext,
+                files = listOf(file),
+                configuration = environment.configuration
+            )
+            .build()
+            .also {
+                compileLock.withLock{
+                    KotlinCodegenFacade.compileCorrectFiles(it)
+                }
             }
-        }
-    }
+            .factory
 
     private fun createContainer(sourcePath: Collection<KtFile>): Pair<ComponentProvider, BindingTraceContext> {
         val trace = CliBindingTrace()
@@ -261,11 +252,7 @@ class CompilerImpl(
             // TODO FileBasedDeclarationProviderFactory keeps indices, re-use it across calls
             declarationProviderFactory = ::FileBasedDeclarationProviderFactory
         )
-        return Pair(container, trace)
-    }
-
-    override fun close() {
-        Disposer.dispose(disposable)
+        return container to trace
     }
 }
 
@@ -276,7 +263,7 @@ private fun KotlinCompilerConfiguration.getScriptDefinitions(
     classPath
         .map { it.fileName.toString() }
         .none { pattern.matches(it) }
-        .let { if (it) return listOf() }
+        .also { if (it) return listOf() }
 
     val scriptImports=listOf(
         "org.gradle.kotlin.dsl.*",
@@ -548,7 +535,6 @@ private fun initKotlinCoreEnvironment(
 ): KotlinCoreEnvironment = KotlinCoreEnvironment
         .createForProduction(
             parentDisposable = disposable,
-            // Not to be confused with the CompilerConfiguration in the language server Configuration
             configuration = KotlinCompilerConfiguration().apply {
                 put(CommonConfigurationKeys.MODULE_NAME, JvmProtoBufUtil.DEFAULT_MODULE_NAME)
                 put(CommonConfigurationKeys.LANGUAGE_VERSION_SETTINGS, LanguageVersionSettingsImpl(
@@ -607,3 +593,88 @@ private fun initKotlinCoreEnvironment(
                 }
         }
 
+
+/**
+ * Manages the class path (compiled JARs, etc), the Java source path
+ * and the compiler. Note that Kotlin sources are stored in SourcePath.
+ */
+class CompilerClassPath(
+    /* Which JVM target the Kotlin compiler uses. See Compiler.jvmTargetFrom for possible values. */
+    private val jvmTarget: String,
+    val outputDirectory: TemporaryDirectory,
+) {
+    private val log by findLogger
+
+    private val innerWorkspaceRoots = mutableMapOf<URI, FilesystemURIWalker>()
+    val workspaceRoots get()= innerWorkspaceRoots.keys.toSet()
+    private val javaSourcePath get()= uriWalker
+        .walk()
+        .filter{it.fileExtension == "java"}
+        .map{it.toPath()}
+        .toSet()
+
+    private val uriWalker get()=
+        DirectoryIgnoringURIWalker(
+                // TODO read gitignore for each path
+                ignoredDirectories=listOf(".*", "bin", "build", "node_modules", "target"),
+                inner = CompositeURIWalker(innerWorkspaceRoots.values))
+
+    fun createCompiler(): Pair<Compiler, Compiler> =
+        resolveClasspath(innerWorkspaceRoots.values.map{it.root})
+            .let { (classpath, buildClasspath)->
+                fun init(classpath: Set<Path>) =
+                    CompilerImpl(
+                        javaSourcePath,
+                        classpath,
+                        outputDirectory.file,
+                        jvmTarget)
+                init(classpath) to init(buildClasspath)
+            }
+
+    var onNewCompiler: ((Pair<Compiler, Compiler>)->Unit)?=null
+
+    fun addWorkspaceRoot(root: URI): Sequence<URI> {
+        log.info("Adding workspace root ${root}")
+        val workspaceWalker= root.filePath
+            ?.let(::FilesystemURIWalker)
+            ?: run {
+                log.warning("Unable to walk root ${root}. Ignored")
+                return emptySequence()
+            }
+        innerWorkspaceRoots[root]=workspaceWalker
+        invalidateCompiler()
+        return workspaceWalker
+            .walk()
+            .map{ it.toPath() }
+            .filter { it.fileName.run { endsWith(".kt") || endsWith(".kts") }}
+            .map { it.toUri() }
+    }
+
+    fun removeWorkspaceRoot(root: URI) {
+        log.info("Removing workspace root ${root}")
+        innerWorkspaceRoots.remove(root) ?: run {
+            log.warning("Root ${root} is not tracked. Unable to remove.")
+            return
+        }
+        invalidateCompiler()
+    }
+
+    fun createdOnDisk(uri: URI) = changedOnDisk(uri)
+    fun deletedOnDisk(uri: URI) = changedOnDisk(uri)
+    fun changedOnDisk(uri: URI) {
+        if (!uriWalker.contains(uri)) return
+        fun isBuildScript(uri: URI): Boolean = File(uri.getPath()).getName().let {
+            it == "pom.xml" || it.endsWith(".gradle") || it.endsWith(".gradle.kts")
+        }
+        fun isJavaSource(file: Path): Boolean = file.fileName.endsWith(".java")
+        val updateClassPath = isBuildScript(uri)
+        val updateJavaSourcePath = uri.filePath?.let(::isJavaSource) ?: false
+        if(!updateClassPath && !updateJavaSourcePath) return
+        invalidateCompiler()
+    }
+
+    /** Updates and possibly reinstantiates the compiler using new paths. */
+    private fun invalidateCompiler() {
+        onNewCompiler?.invoke(createCompiler())
+    }
+}

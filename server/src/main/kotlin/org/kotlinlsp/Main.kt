@@ -54,7 +54,7 @@ fun main(argv: Array<String>) {
         + CoroutineName("kotlin-lsp-worker")
         + Job())
 
-    val server = KotlinLanguageServer(scope)
+    val server = KotlinLanguageServer()
     val threads = Executors.newSingleThreadExecutor { Thread(it, "client") }
     val launcher = LSPLauncher.createServerLauncher(
         server.asLsp4j(scope),

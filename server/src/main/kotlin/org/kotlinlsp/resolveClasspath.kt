@@ -8,55 +8,45 @@ import java.nio.file.Path
 import java.nio.file.PathMatcher
 import java.nio.file.Paths
 import org.kotlinlsp.logging.*
-import org.kotlinlsp.source.URIWalker
+import org.kotlinlsp.source.FilesystemURIWalker
 import org.kotlinlsp.util.execAndReadStdoutAndStderr
 import org.kotlinlsp.util.filePath
 import org.kotlinlsp.util.fileName
 import org.kotlinlsp.util.findCommandOnPath
-import org.kotlinlsp.util.isOSWindows
 import org.kotlinlsp.util.TempFile
 
 private val log by findLogger.atToplevel(object{})
 
 // TODO more sources than gradle? Look in git history for maven and more
 
-fun resolveClasspath(workspaceRoots: Collection<URIWalker>)
-    = workspaceRoots
-        .flatMap{ workspaceRoot->
-            workspaceRoot
-                .walk()
-                .asSequence()
-        }
-        .mapNotNull{it.takeIf { listOf("build.gradle.kts").contains(it.fileName) }}
-        .let {
-            copyResourceAsTempfile("kotlinDSLClassPathFinder.gradle.kts")
-                .use { tmpFile->
-                    val helperScript=tmpFile.path
-                        .toAbsolutePath()
-                        .toString()
-                    it.flatMap {
-                        resolveClasspathUsingGradle(it, helperScript)
-                            .map { (a,b)->a to b }
-                    }
+fun resolveClasspath(workspaceRoots: Collection<Path>) =
+    copyResourceAsTempfile("kotlinDSLClassPathFinder.gradle.kts")
+        .use { tmpFile->
+            val helperScript=tmpFile.path
+                .toAbsolutePath()
+                .toString()
+            workspaceRoots
+                .flatMap {
+                    resolveClasspathUsingGradle(it, helperScript)
+                        .map { (a,b)->a to b }
                 }
         }
-        .toMap()
-        .let { map->
-            fun asPaths(key: String) =
-                map.values // TODO per-project partitioning?
-                    .flatMap{it.get(key) ?: listOf()}
-                    .map { Paths.get(it) }
-                    .toSet()
-                    .also{log.debug("Classpath ${key} for task ${it}")}
-            asPaths("dependency") to asPaths("build-dependency")
-        }
+    .toMap()
+    .let { map->
+        fun asPaths(key: String) =
+            map.values // TODO per-project partitioning?
+                .flatMap{it.get(key) ?: listOf()}
+                .map { Paths.get(it) }
+                .toSet()
+                .also{log.debug("${key} classpath found ${it.size} dependencies")}
+        asPaths("dependency") to asPaths("build-dependency")
+    }
 
-private fun resolveClasspathUsingGradle(path: URI, helperScript: String) =
+private fun resolveClasspathUsingGradle(path: Path, helperScript: String) =
         run {
-            val projectDirectory = path.filePath!!.getParent()
-            log.info("Resolving dependencies for '${projectDirectory.fileName}' through Gradle's CLI")
-            execAndReadStdoutAndStderr(projectDirectory, listOf(
-                    getGradleCommand(projectDirectory).toString(),
+            log.info("Resolving dependencies for '${path}' through Gradle's CLI")
+            execAndReadStdoutAndStderr(path, listOf(
+                    getGradleCommand(path).toString(),
                     "-I", helperScript,
                     "kotlin-lsp-deps",
                     "--console=plain",
@@ -116,8 +106,7 @@ private fun copyResourceAsTempfile(scriptName: String) =
     }
 
 private fun getGradleCommand(workspace: Path): Path {
-    val wrapperName = if (isOSWindows()) "gradlew.bat" else "gradlew"
-    val wrapper = workspace.resolve(wrapperName).toAbsolutePath()
+    val wrapper = workspace.resolve("gradlew").toAbsolutePath()
     if (Files.isExecutable(wrapper)) {
         return wrapper
     } else {
