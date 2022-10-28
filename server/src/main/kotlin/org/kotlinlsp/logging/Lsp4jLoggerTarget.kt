@@ -16,7 +16,8 @@ class Lsp4jLoggerTarget(
                 Level.INFO -> MessageType.Info
                 else -> MessageType.Log
             }
-            message = "[${record.level}] ${record.loggerName}: ${record.message}"
+            val additional = record.thrown?.let{"\\n${it.stackTraceToString()}"} ?: ""
+            message = "[${record.level}] ${record.loggerName}: ${record.message}${additional}"
         })
 }
 
