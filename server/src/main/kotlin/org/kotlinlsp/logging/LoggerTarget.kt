@@ -30,10 +30,15 @@ class FunctionLoggerTarget(
 }
 
 class DelegateLoggerTarget(
-    var inner: LoggerTarget
+    private var inner: LoggerTarget
 ): LoggerTarget {
     override fun write(message:LogRecord) = inner.write(message)
     override fun onReplaceWith(other: LoggerTarget)
         = inner.onReplaceWith(other)
+
+    fun setLogger(target: LoggerTarget) {
+        inner.onReplaceWith(target)
+        inner=target
+    }
 }
 

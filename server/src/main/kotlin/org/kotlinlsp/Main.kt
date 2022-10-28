@@ -34,18 +34,17 @@ class Args {
 }
 
 fun main(argv: Array<String>) {
-    // Redirect java.util.logging calls (e.g. from LSP4J)
     val loggerTarget = DelegateLoggerTarget(QueueLoggerTarget())
     LoggerTargetJulHandler.install(loggerTarget)
 
     val args = Args().also { JCommander.newBuilder().addObject(it).build().parse(*argv) }
     val (inStream, outStream) = args.tcpClientPort?.let {
         // Launch as TCP Client
-        loggerTarget.inner=FunctionLoggerTarget{ println(it.message) }
+        loggerTarget.setLogger(FunctionLoggerTarget{ println(it.message) })
         tcpConnectToClient(args.tcpClientHost, it)
     } ?: args.tcpServerPort?.let {
         // Launch as TCP Server
-        loggerTarget.inner=FunctionLoggerTarget{ println(it.message) }
+        loggerTarget.setLogger(FunctionLoggerTarget{ println(it.message) })
         tcpStartServer(it)
     } ?: Pair(System.`in`, System.out)
 
@@ -62,7 +61,7 @@ fun main(argv: Array<String>) {
         outStream,
         threads) { it }
 
-    loggerTarget.inner = Lsp4jLoggerTarget(launcher.remoteProxy!!)
+    loggerTarget.setLogger(Lsp4jLoggerTarget(launcher.remoteProxy!!))
 
     server.connect(launcher.remoteProxy)
     launcher.startListening()
