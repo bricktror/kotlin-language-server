@@ -39,78 +39,81 @@ private class JavaTextDocumentServiceFacade(
         private val service: TextDocumentService,
         private val scope: CoroutineScope
 ) : JavaTextDocumentService {
-    private fun <T> launch(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
+    private fun <T> async(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
             scope.async { fn() }.asCompletableFuture()
+    private fun launch(fn:(suspend CoroutineScope.()->Unit)): Unit {
+        scope.launch{fn()}
+    }
 
-    override fun didOpen(params: DidOpenTextDocumentParams) {
+    override fun didOpen(params: DidOpenTextDocumentParams) = launch {
         service.didOpen(params)
     }
 
-    override fun didSave(params: DidSaveTextDocumentParams) {
+    override fun didSave(params: DidSaveTextDocumentParams) = launch {
         service.didSave(params)
     }
 
-    override fun didClose(params: DidCloseTextDocumentParams) {
+    override fun didClose(params: DidCloseTextDocumentParams) = launch {
         service.didClose(params)
     }
 
-    override fun didChange(params: DidChangeTextDocumentParams) {
+    override fun didChange(params: DidChangeTextDocumentParams) = launch {
         service.didChange(params)
     }
 
-    override fun codeAction(params: CodeActionParams) = launch {
+    override fun codeAction(params: CodeActionParams) = async {
         service.codeAction(params).map { it.asLsp4jEither() }
     }
 
-    override fun hover(position: HoverParams) = launch { service.hover(position) }
+    override fun hover(position: HoverParams) = async { service.hover(position) }
 
     override fun documentHighlight(
             position: DocumentHighlightParams
-    ): CompletableFuture<List<DocumentHighlight>> = launch { service.documentHighlight(position) }
+    ): CompletableFuture<List<DocumentHighlight>> = async { service.documentHighlight(position) }
 
-    override fun onTypeFormatting(params: DocumentOnTypeFormattingParams) = launch {
+    override fun onTypeFormatting(params: DocumentOnTypeFormattingParams) = async {
         service.onTypeFormatting(params)
     }
 
-    override fun definition(position: DefinitionParams) = launch {
+    override fun definition(position: DefinitionParams) = async {
         service.definition(position).asLsp4jEither()
     }
 
-    override fun rangeFormatting(params: DocumentRangeFormattingParams) = launch {
+    override fun rangeFormatting(params: DocumentRangeFormattingParams) = async {
         service.rangeFormatting(params)
     }
 
-    override fun codeLens(params: CodeLensParams) = launch { service.codeLens(params) }
+    override fun codeLens(params: CodeLensParams) = async { service.codeLens(params) }
 
-    override fun rename(params: RenameParams) = launch { service.rename(params) }
+    override fun rename(params: RenameParams) = async { service.rename(params) }
 
-    override fun completion(position: CompletionParams) = launch {
+    override fun completion(position: CompletionParams) = async {
         service.completion(position).asLsp4jEither()
     }
 
-    override fun resolveCompletionItem(unresolved: CompletionItem) = launch {
+    override fun resolveCompletionItem(unresolved: CompletionItem) = async {
         service.resolveCompletionItem(unresolved)
     }
 
-    override fun signatureHelp(position: SignatureHelpParams) = launch {
+    override fun signatureHelp(position: SignatureHelpParams) = async {
         service.signatureHelp(position)
     }
 
-    override fun formatting(params: DocumentFormattingParams) = launch {
+    override fun formatting(params: DocumentFormattingParams) = async {
         service.formatting(params)
     }
 
-    override fun references(position: ReferenceParams) = launch { service.references(position) }
+    override fun references(position: ReferenceParams) = async { service.references(position) }
 
-    override fun semanticTokensFull(params: SemanticTokensParams) = launch {
+    override fun semanticTokensFull(params: SemanticTokensParams) = async {
         service.semanticTokensFull(params)
     }
 
-    override fun semanticTokensRange(params: SemanticTokensRangeParams) = launch {
+    override fun semanticTokensRange(params: SemanticTokensRangeParams) = async {
         service.semanticTokensRange(params)
     }
 
-    override fun resolveCodeLens(unresolved: CodeLens) = launch {
+    override fun resolveCodeLens(unresolved: CodeLens) = async {
         service.resolveCodeLens(unresolved)
     }
 }

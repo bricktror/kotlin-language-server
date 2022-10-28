@@ -30,14 +30,14 @@ private class JavaProtocolExtensionsFacade(
     private val service: ProtocolExtensions,
     private val scope: CoroutineScope,
 ): JavaProtocolExtensions {
-    private fun <T> launch(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
+    private fun <T> async(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
             scope.async { fn() }.asCompletableFuture()
 
-    override fun jarClassContents(textDocument: TextDocumentIdentifier) = launch {
+    override fun jarClassContents(textDocument: TextDocumentIdentifier) = async {
         service.jarClassContents(textDocument)
     }
 
-    override fun overrideMember(position: TextDocumentPositionParams) = launch {
+    override fun overrideMember(position: TextDocumentPositionParams) = async {
         service.overrideMember(position)
     }
 }

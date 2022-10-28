@@ -21,22 +21,28 @@ class JavaWorkspaceServiceFacade(
         private val service: WorkspaceService,
         private val scope: CoroutineScope
 ) : JavaWorkspaceService {
-    private fun <T> launch(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
+    private fun <T> async(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
             scope.async { fn() }.asCompletableFuture()
 
-    override fun executeCommand(params: ExecuteCommandParams): CompletableFuture<Any?> = launch {
+    override fun executeCommand(params: ExecuteCommandParams): CompletableFuture<Any?> = async {
         service.executeCommand(params)
     }
 
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
-        service.didChangeWatchedFiles(params)
+        scope.launch  {
+            service.didChangeWatchedFiles(params)
+        }
     }
 
     override fun didChangeConfiguration(params: DidChangeConfigurationParams) {
-        service.didChangeConfiguration(params)
+        scope.launch  {
+            service.didChangeConfiguration(params)
+        }
     }
 
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
-        service.didChangeWorkspaceFolders(params)
+        scope.launch  {
+            service.didChangeWorkspaceFolders(params)
+        }
     }
 }

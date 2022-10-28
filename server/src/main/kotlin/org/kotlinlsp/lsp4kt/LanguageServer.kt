@@ -26,18 +26,18 @@ class JavaLanguageServerFacade(
     private val service : LanguageServer,
     private val scope: CoroutineScope,
 ): JavaLanguageServer {
-    private fun <T> launch(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
+    private fun <T> async(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
             scope.async { fn() }.asCompletableFuture()
 
     override fun getTextDocumentService(): JavaTextDocumentService = service.textDocumentService.asLsp4j(scope)
     override fun getWorkspaceService(): JavaWorkspaceService = service.workspaceService.asLsp4j(scope)
     @JsonDelegate fun getExtensionsService(): JavaProtocolExtensions = service.extensions.asLsp4j(scope)
 
-    override fun initialize(params: InitializeParams) = launch {
+    override fun initialize(params: InitializeParams) = async {
         service.initialize(params)
     }
 
-    override fun shutdown()=launch{
+    override fun shutdown()=async{
         service.shutdown()
     }
 
