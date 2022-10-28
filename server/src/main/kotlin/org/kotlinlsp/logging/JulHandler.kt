@@ -16,10 +16,12 @@ class LoggerTargetJulHandler(
     override fun close() {}
 
     companion object {
+        private val log by findLogger
+
         fun install(target: LoggerTarget) {
             val logger=java.util.logging.Logger.getLogger("")
             logger.getHandlers().forEach{logger.removeHandler(it)}
-            logger.setLevel(Level.FINE)
+            logger.setLevel(Level.ALL)
             logger.addHandler(LoggerTargetJulHandler(target))
         }
     }

@@ -8,7 +8,7 @@ class Lsp4jLoggerTarget(
     private val client: LanguageClient,
 ): LoggerTarget {
     override fun write(record: LogRecord) =
-        client?.logMessage(MessageParams().apply {
+        client.logMessage(MessageParams().apply {
             type = when(record.level)
             {
                 Level.SEVERE -> MessageType.Error
@@ -16,7 +16,7 @@ class Lsp4jLoggerTarget(
                 Level.INFO -> MessageType.Info
                 else -> MessageType.Log
             }
-            message = "${record.loggerName}: ${record.message}"
+            message = "[${record.level}] ${record.loggerName}: ${record.message}"
         })
 }
 
