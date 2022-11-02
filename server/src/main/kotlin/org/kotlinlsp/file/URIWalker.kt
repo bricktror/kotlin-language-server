@@ -49,7 +49,7 @@ class DirectoryIgnoringURIWalker(
     override fun walk(shouldRecurse: (URI)->Boolean): Sequence<URI> =
         inner.walk { uri->
             val segments = uri.getPath().split('/')
-            ignoredDirectories.any{ segments.contains(it) }
+            ignoredDirectories.none{ segments.contains(it) }
         }
 
     override fun contains(uri: URI) =
