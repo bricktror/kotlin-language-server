@@ -7,17 +7,14 @@ import kotlin.coroutines.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
 import java.util.concurrent.CompletableFuture
+import org.kotlinlsp.logging.*
 
 interface ProtocolExtensions {
-    suspend fun jarClassContents(textDocument: TextDocumentIdentifier): String?
     suspend fun overrideMember(position: TextDocumentPositionParams): List<CodeAction>
 }
 
 @JsonSegment("kotlin")
 interface JavaProtocolExtensions {
-    @JsonRequest
-    fun jarClassContents(textDocument: TextDocumentIdentifier): CompletableFuture<String?>
-
     @JsonRequest
     fun overrideMember(position: TextDocumentPositionParams): CompletableFuture<List<CodeAction>>
 }
@@ -30,14 +27,23 @@ private class JavaProtocolExtensionsFacade(
     private val service: ProtocolExtensions,
     private val scope: CoroutineScope,
 ): JavaProtocolExtensions {
-    private fun <T> async(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
-            scope.async { fn() }.asCompletableFuture()
+    private val log by findLogger
 
-    override fun jarClassContents(textDocument: TextDocumentIdentifier) = async {
-        service.jarClassContents(textDocument)
-    }
+    private fun <T> asyncOr(
+        description: String,
+        onErrorValue: ()->T,
+        fn: (suspend CoroutineScope.() -> T)
+    ): CompletableFuture<T> =
+        scope.async {
+            log.catchingOr(description, onErrorValue) {
+                fn()
+            }
+        }.asCompletableFuture()
 
-    override fun overrideMember(position: TextDocumentPositionParams) = async {
+
+    override fun overrideMember(
+        position: TextDocumentPositionParams
+    ) = asyncOr("overrideMember", {emptyList()}) {
         service.overrideMember(position)
     }
 }

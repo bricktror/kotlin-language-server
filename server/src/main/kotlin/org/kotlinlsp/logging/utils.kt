@@ -32,14 +32,28 @@ fun Logger.debug(message: String) = config(message)
 fun Logger.debug(message: Supplier<String>) = config(message)
 
 /** Run action and swallow and log any exception thrown */
-fun Logger.catching(description: String, action: () -> Unit): Unit {
+inline fun <T> Logger.catching(description: String, action: () -> T): T? =
     try {
         action()
     }
-    catch (e: Exception) {
+    catch (e: Error) {
         error(e, "Error while ${description}")
+        null
     }
-}
+
+/** Run action and swallow and log any exception thrown */
+inline fun <T> Logger.catchingOr(
+    description: String,
+    valueOnError: ()->T,
+    action: () -> T
+): T =
+    try {
+        action()
+    }
+    catch (e: Error) {
+        error(e, "Error while ${description}")
+        valueOnError()
+    }
 
 /**
  * Run the provided action and log the duration of the operation.

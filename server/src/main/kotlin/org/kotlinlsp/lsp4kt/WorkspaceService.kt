@@ -21,28 +21,47 @@ class JavaWorkspaceServiceFacade(
         private val service: WorkspaceService,
         private val scope: CoroutineScope
 ) : JavaWorkspaceService {
-    private fun <T> async(fn: (suspend CoroutineScope.() -> T)): CompletableFuture<T> =
-            scope.async { fn() }.asCompletableFuture()
+    private val log by findLogger
 
-    override fun executeCommand(params: ExecuteCommandParams): CompletableFuture<Any?> = async {
+    private fun <T> async(
+        description: String,
+        fn: (suspend CoroutineScope.() -> T?)
+    ): CompletableFuture<T?> =
+        scope.async {
+            log.catching(description) {
+                fn()
+            }
+        }.asCompletableFuture()
+
+    private fun launch(description: String, fn:(suspend CoroutineScope.()->Unit)): Unit {
+        scope.launch {
+            log.catching(description){
+                fn()
+            }
+        }
+    }
+
+    override fun executeCommand(
+        params: ExecuteCommandParams
+    ): CompletableFuture<Any?> = async("executeCommand") {
         service.executeCommand(params)
     }
 
-    override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
-        scope.launch  {
-            service.didChangeWatchedFiles(params)
-        }
+    override fun didChangeWatchedFiles(
+        params: DidChangeWatchedFilesParams
+    ) = launch("didChangeWatchedFiles") {
+        service.didChangeWatchedFiles(params)
     }
 
-    override fun didChangeConfiguration(params: DidChangeConfigurationParams) {
-        scope.launch  {
-            service.didChangeConfiguration(params)
-        }
+    override fun didChangeConfiguration(
+        params: DidChangeConfigurationParams
+    ) = launch("didChangeConfiguration") {
+        service.didChangeConfiguration(params)
     }
 
-    override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
-        scope.launch  {
-            service.didChangeWorkspaceFolders(params)
-        }
+    override fun didChangeWorkspaceFolders(
+        params: DidChangeWorkspaceFoldersParams
+    ) = launch("didChangeWorkspaceFolders") {
+        service.didChangeWorkspaceFolders(params)
     }
 }
