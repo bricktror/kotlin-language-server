@@ -74,9 +74,6 @@ import org.kotlinlsp.util.toLsp4jRange
 import org.kotlinlsp.prettyprint.*
 import org.kotlinlsp.source.context.lexicalScopeAt
 
-fun KotlinTextDocumentService.lollo() {
-}
-
 class KotlinTextDocumentService(
     private val sourceFiles: SourceFileRepository,
     private val tempDirectory: TemporaryDirectory,
