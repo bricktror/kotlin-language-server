@@ -7,8 +7,8 @@ fun Position.getIndexIn(content: String ) =
         .also { assert(!it.contains('\r')) }
         .asIterable()
         .ordinalIndexOf(line-1){it=='\n'}
-        ?.let{it+character+1}
-        ?: -1
+        .let { it ?: -1 }
+        .let{it+character+1}
 
 fun indexToPosition(content: String, offset: Int): Position =
     content
