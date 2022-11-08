@@ -20,7 +20,6 @@ import org.eclipse.lsp4j.services.WorkspaceService as JavaWorkspaceService
 import org.kotlinlsp.index.SymbolIndex
 import org.kotlinlsp.logging.*
 import org.kotlinlsp.lsp4kt.*
-import org.kotlinlsp.semanticTokensLegend
 import org.kotlinlsp.file.*
 import org.kotlinlsp.source.*
 import org.kotlinlsp.file.TemporaryDirectory
@@ -98,9 +97,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
         tempDirectory,
         fileProvider)
 
-    override val extensions = KotlinProtocolExtensionService(
-        fileProvider,
-        sourceFileRepository)
+    override val extensions = KotlinProtocolExtensionService(sourceFileRepository)
 
     private var client: LanguageClient? = null
 
@@ -130,8 +127,6 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
         params.workspaceFolders
             .map{parseURI(it.uri)}
             .forEach{ workspaceService.addWorkspaceRoot(it) }
-
-        textDocumentService.lintAll()
 
         return InitializeResult().apply{
             serverInfo = ServerInfo("Kotlin Language Server", VERSION)
@@ -166,7 +161,6 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     }
 
     override fun close() {
-        textDocumentService.close()
         workspaceService.close()
         tempDirectory.close()
     }

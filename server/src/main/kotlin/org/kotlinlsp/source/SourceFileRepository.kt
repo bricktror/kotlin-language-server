@@ -67,7 +67,7 @@ class SourceFileRepository(
                                 updater(currentValue)
                                     .also { nextValue->
                                         if (nextValue != currentValue)
-                                            currentValue?.onReplacedWith(nextValue)
+                                            currentValue?.close()
                                     }
                             }
                             catch (ex: Error) {
@@ -183,12 +183,12 @@ class SourceFileRepository(
 
     /** Compile changed files */
     fun compileFiles(uris: Collection<URI>) =
-            files.updateAll(ensure.isParsed(compiler))
-                .map { it.ktFile }
-                .let { dependencies -> files.updateAll(uris, ensure.isCompiledUnsafe(dependencies)) }
+        files.updateAll(ensure.isParsed(compiler))
+            .map { it.ktFile }
+            .let { dependencies -> files.updateAll(uris, ensure.isCompiledUnsafe(dependencies)) }
 
     fun compileFile(uri: URI) =
-        compileFiles(listOf(uri)).first()
+        compileFiles(listOf(uri)).firstOrNull()
 
     /**
      * Refreshes the indexes. If already done, refreshes only the declarations in the files that were changed.

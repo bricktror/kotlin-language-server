@@ -132,11 +132,18 @@ class KotlinWorkspaceService(
             }
         innerWorkspaceRoots[root]=walker
         invalidateCompiler()
+
         walker
+            .let { DirectoryIgnoringURIWalker(it, listOf("build")) }
             .walk()
             .map{ it.toPath() }
-            .filter { it.fileName.run { endsWith(".kt") || endsWith(".kts") }}
+            .filter { it.fileName.toString().run { endsWith(".kt") || endsWith(".kts") } }
             .map { it.toUri() }
+            .toList()
+            .also{
+                log.info{"Registering ${it.size} source files"}
+                log.finer{ "Registering source files ${root}: ${it.map(root::relativize)}" }
+            }
             .forEach { sourceFileRepository.readFromProvider(it) }
     }
 
@@ -152,17 +159,16 @@ class KotlinWorkspaceService(
         invalidateCompiler()
     }
 
-    private val uriWalker get()=
-        DirectoryIgnoringURIWalker(
-                // TODO read gitignore for each path
-                ignoredDirectories=listOf(".*", "bin", "build", "node_modules", "target"),
-                inner = CompositeURIWalker(innerWorkspaceRoots.values))
-
     private fun onChange(uri: URI) {
+        val uriWalker= DirectoryIgnoringURIWalker(
+            // TODO read gitignore for each path
+            ignoredDirectories=listOf(".*", "bin", "build", "node_modules", "target"),
+            inner = CompositeURIWalker(innerWorkspaceRoots.values))
         if (!uriWalker.contains(uri)) return
-        val updateClassPath = File(uri.getPath()).getName().let {
-            it == "pom.xml" || it.endsWith(".gradle") || it.endsWith(".gradle.kts")
-        }
+        val updateClassPath = uri.getPath()
+            .let{File(it)}
+            .getName()
+            .let { it == "pom.xml" || it.endsWith(".gradle") || it.endsWith(".gradle.kts") }
         if(!updateClassPath) return
         invalidateCompiler()
     }
