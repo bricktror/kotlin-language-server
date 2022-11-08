@@ -302,15 +302,13 @@ fun findLexicalScopedCompletions(
                             }}
                     }
                 }
-                is KtReferenceExpression -> {
+                is KtReferenceExpression, is PsiErrorElement -> {
+                    // Note PsiErrorElement can be e.g. `foo.in` where `in` is a keyword,
+                    // but also a partial `info` so we need to assume it is correct
                     val text=segment.textUntilCursor(cursor)
                     log.finer{"Filtering completions starting with ${text}"}
                     items.filter{it.label()?.startsWith(text) ?: false}
                 }
-                /* is PsiErrorElement -> { */
-                /*     log.finer{"Got error node ${segment.textUntilCursor(cursor)} (${segment})"} */
-                /*     items */
-                /* } */
                 else -> {
                     log.finer{"Other: ${segment} ${segment.textUntilCursor(cursor)}"}
                     items
